@@ -15,6 +15,7 @@ namespace VideoCutCS
             _ffmpegPath = Path.Combine(baseDir, "Executables", "ffmpeg.exe");
         }
 
+        // デバッグ用、もしくは起動時のチェック用として保持
         public async Task<string> GetFFmpegVersionAsync()
         {
             if (!File.Exists(_ffmpegPath)) return "エラー: FFmpegが見つかりません。";
@@ -48,20 +49,15 @@ namespace VideoCutCS
             if (!File.Exists(inputPath)) return $"エラー: 入力ファイルが見つかりません: {inputPath}";
 
             string arguments = $"-ss {start} -i \"{inputPath}\" -to {end} -c copy -map 0 -y \"{outputPath}\"";
-
             return await RunFFmpegAsync(arguments);
         }
 
-        // ★修正: 画像をPNG形式で保存するメソッドに変更
         public async Task<string> SaveSnapshotAsync(string inputPath, string outputPath, TimeSpan position)
         {
             if (!File.Exists(_ffmpegPath)) return "エラー: FFmpegが見つかりません。";
             if (!File.Exists(inputPath)) return $"エラー: 入力ファイルが見つかりません: {inputPath}";
 
-            // -frames:v 1 : 1フレームだけ出力
-            // -c:v png   : PNG形式でエンコード
             string arguments = $"-ss {position} -i \"{inputPath}\" -frames:v 1 -c:v png -y \"{outputPath}\"";
-
             return await RunFFmpegAsync(arguments);
         }
 

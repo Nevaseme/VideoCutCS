@@ -119,8 +119,7 @@
                         <Ellipse Width="14" Height="14" Fill="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Grid>
 
-                    <!-- ★自作ツールチップ (標準ToolTipの代わりに配置) -->
-                    <!-- MarginのTopをマイナスにしてタイムラインの上に表示 -->
+                    <!-- 自作ツールチップ -->
                     <Grid x:Name="HoverTooltip"
                           VerticalAlignment="Top"
                           HorizontalAlignment="Left"
@@ -140,14 +139,13 @@
                                        FontWeight="SemiBold"/>
                         </Border>
 
-                        <!-- 下向きの三角（吹き出しのしっぽ） -->
+                        <!-- 下向きの三角 -->
                         <Polygon Points="0,0 6,6 12,0" 
                                  Fill="#CC000000" 
                                  HorizontalAlignment="Center" 
                                  VerticalAlignment="Bottom" 
                                  Margin="0,0,0,-6"/>
                     </Grid>
-
                 </Grid>
 
                 <!-- 時間表示テキスト -->
@@ -160,7 +158,7 @@
                              VerticalAlignment="Center"
                              KeyDown="TimeBox_KeyDown"
                              TextChanged="TimeBox_TextChanged"
-                             GotFocus="TimeBox_GotFocus"
+                             GotFocus="Shared_TextBox_GotFocus"
                              LostFocus="TimeBox_LostFocus"/>
                     <TextBlock Text="/" FontSize="14" Foreground="White" VerticalAlignment="Center"/>
                     <TextBlock x:Name="DurationText"
@@ -174,12 +172,18 @@
             <!-- カット範囲設定（開始/終了） -->
             <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
                 <TextBlock Text="開始:" FontSize="16" Foreground="LightGray" VerticalAlignment="Center"/>
-                <TextBox x:Name="TextStartTime" Text="00:00:00.000" Width="120" FontSize="16" Background="Transparent" BorderThickness="0,0,0,1" Foreground="White" GotFocus="StartTime_GotFocus" LostFocus="StartTime_LostFocus" KeyDown="StartTime_KeyDown"/>
+                <TextBox x:Name="TextStartTime" Text="00:00:00.000" Width="120" FontSize="16" Background="Transparent" BorderThickness="0,0,0,1" Foreground="White" 
+                         GotFocus="Shared_TextBox_GotFocus" 
+                         LostFocus="StartTime_LostFocus" 
+                         KeyDown="StartTime_KeyDown"/>
 
                 <TextBlock Text="～" FontSize="16" Foreground="LightGray" VerticalAlignment="Center"/>
 
                 <TextBlock Text="終了:" FontSize="16" Foreground="LightGray" VerticalAlignment="Center"/>
-                <TextBox x:Name="TextEndTime" Text="(未設定)" Width="120" FontSize="16" Background="Transparent" BorderThickness="0,0,0,1" Foreground="White" GotFocus="EndTime_GotFocus" LostFocus="EndTime_LostFocus" KeyDown="EndTime_KeyDown"/>
+                <TextBox x:Name="TextEndTime" Text="(未設定)" Width="120" FontSize="16" Background="Transparent" BorderThickness="0,0,0,1" Foreground="White" 
+                         GotFocus="Shared_TextBox_GotFocus" 
+                         LostFocus="EndTime_LostFocus" 
+                         KeyDown="EndTime_KeyDown"/>
 
                 <TextBlock x:Name="TextDuration" Text="(長さ: 00:00:00.000)" FontSize="16" Foreground="Gray" VerticalAlignment="Center" Margin="10,0,0,0"/>
             </StackPanel>
