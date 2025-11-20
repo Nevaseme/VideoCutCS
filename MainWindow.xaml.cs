@@ -30,8 +30,6 @@ namespace VideoCutCS
         private bool _isEditingEnd = false;
         private bool _isDraggingTimeline = false;
         private bool _skipZoomHandler = false;
-
-        // Zoom入力制御用フラグ
         private bool _isEditingZoom = false;
         private bool _isUpdatingZoomByCode = false;
 
@@ -40,9 +38,20 @@ namespace VideoCutCS
             this.InitializeComponent();
             this.Title = "VideoCutCS - 開発中";
 
+            InitializeControlsFromSettings();
+
             _timer = new DispatcherTimer();
             _timer.Interval = TimeSpan.FromMilliseconds(33);
             _timer.Tick += Timer_Tick;
+        }
+
+        private void InitializeControlsFromSettings()
+        {
+            if (ZoomSlider != null)
+            {
+                ZoomSlider.Minimum = AppSettings.Current.ZoomMin;
+                ZoomSlider.Maximum = AppSettings.Current.ZoomMax;
+            }
         }
 
         // ====================================================
@@ -79,8 +88,8 @@ namespace VideoCutCS
             {
                 _timer.Start();
                 _skipZoomHandler = true;
-                if (ZoomSlider != null) ZoomSlider.Value = 1.0; // 安全策
-                if (ZoomBox != null) ZoomBox.Text = "x 1.0";
+                if (ZoomSlider != null) ZoomSlider.Value = AppSettings.Current.ZoomMin;
+                if (ZoomBox != null) ZoomBox.Text = $"x {AppSettings.Current.ZoomMin:F1}";
                 _skipZoomHandler = false;
 
                 UpdateTimelineWidth();
@@ -114,8 +123,8 @@ namespace VideoCutCS
             if (!_isDraggingTimeline)
             {
                 UpdatePlayhead(session.Position);
-                // 再生中の自動スクロール
-                EnsurePlayheadVisible(session.Position);
+                // ★修正: 再生中も常に中央に維持する
+                KeepPlayheadCentered();
             }
 
             if (!_isEditingTime)
@@ -140,7 +149,6 @@ namespace VideoCutCS
         {
             if (_skipZoomHandler) return;
 
-            // テキストボックスの表示を更新
             if (ZoomBox != null && !_isEditingZoom)
             {
                 _isUpdatingZoomByCode = true;
@@ -158,67 +166,71 @@ namespace VideoCutCS
             double viewportWidth = TimelineScrollViewer.ActualWidth;
             if (viewportWidth <= 0) return;
 
-            double currentOffset = TimelineScrollViewer.HorizontalOffset;
-            double currentCenter = currentOffset + (viewportWidth / 2);
-
-            double oldWidth = TimelineArea.Width;
-            if (double.IsNaN(oldWidth) || oldWidth <= 0)
-            {
-                oldWidth = TimelineArea.ActualWidth;
-            }
-            if (oldWidth <= 0) oldWidth = viewportWidth;
-
-            double centerRatio = currentCenter / oldWidth;
-
+            // 1. 幅を適用
             double zoom = ZoomSlider.Value;
             double newWidth = viewportWidth * zoom;
             TimelineArea.Width = newWidth;
 
             UpdateTimelineLayout();
+
             if (Player.MediaPlayer?.PlaybackSession != null)
+            {
                 UpdatePlayhead(Player.MediaPlayer.PlaybackSession.Position);
-
-            double newTargetOffset = (newWidth * centerRatio) - (viewportWidth / 2);
-            if (newTargetOffset < 0) newTargetOffset = 0;
-
-            if (!double.IsNaN(newTargetOffset) && !double.IsInfinity(newTargetOffset))
-            {
-                TimelineScrollViewer.ChangeView(newTargetOffset, null, null);
             }
+
+            // ★修正: レイアウト更新後に確実に中央寄せを行うため、DispatcherQueueに入れる
+            this.DispatcherQueue.TryEnqueue(() =>
+            {
+                KeepPlayheadCentered();
+            });
         }
 
-        private void EnsurePlayheadVisible(TimeSpan time)
+        // ★新規: 再生ヘッドを画面中央に配置する共通メソッド
+        private void KeepPlayheadCentered()
         {
-            if (ZoomSlider == null || ZoomSlider.Value <= 1.0) return;
-            if (TimelineScrollViewer == null) return;
+            if (TimelineScrollViewer == null || TimelineArea == null || Player.MediaPlayer?.PlaybackSession == null) return;
 
-            double x = GetXFromTime(time);
-            double currentOffset = TimelineScrollViewer.HorizontalOffset;
-            double viewportWidth = TimelineScrollViewer.ViewportWidth;
+            var position = Player.MediaPlayer.PlaybackSession.Position;
+            double x = GetXFromTime(position);
 
-            if (x < currentOffset)
+            double viewportWidth = TimelineScrollViewer.ActualWidth;
+            // 中央寄せのオフセット計算: (再生ヘッドX) - (画面半分)
+            double targetOffset = x - (viewportWidth / 2.0);
+
+            if (targetOffset < 0) targetOffset = 0;
+
+            // 現在位置と大きくずれている場合のみスクロール（微細な振動防止）
+            if (Math.Abs(TimelineScrollViewer.HorizontalOffset - targetOffset) > 1.0)
             {
-                TimelineScrollViewer.ChangeView(x - 20, null, null);
-            }
-            else if (x > currentOffset + viewportWidth)
-            {
-                TimelineScrollViewer.ChangeView(x - viewportWidth + 20, null, null);
+                TimelineScrollViewer.ChangeView(targetOffset, null, null);
             }
         }
 
-        // ----------------------------------------------------
-        // 共通ズーム処理メソッド
-        // ----------------------------------------------------
+        // --- 共通ズーム処理 ---
         private void PerformZoomStep(int mouseWheelDelta)
         {
             if (ZoomSlider == null) return;
 
-            double zoomChange = (mouseWheelDelta > 0) ? 0.5 : -0.5;
+            double step = AppSettings.Current.ZoomStep;
+            double zoomChange = (mouseWheelDelta > 0) ? step : -step;
+
             double newVal = Math.Clamp(ZoomSlider.Value + zoomChange, ZoomSlider.Minimum, ZoomSlider.Maximum);
             ZoomSlider.Value = newVal;
         }
 
-        // アプリ全体(MainRoot)でのホイールイベントハンドラ
+        // --- 共通シーク量計算 ---
+        private double CalculateSeekSeconds()
+        {
+            double step = AppSettings.Current.SeekStepNormal;
+            if (ZoomSlider != null)
+            {
+                if (ZoomSlider.Value >= AppSettings.Current.ZoomThresholdHigh) step = AppSettings.Current.SeekStepHigh;
+                else if (ZoomSlider.Value >= AppSettings.Current.ZoomThresholdMedium) step = AppSettings.Current.SeekStepMedium;
+            }
+            return step;
+        }
+
+        // アプリ全体(MainRoot)でのホイール
         private void MainRoot_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
         {
             var shiftState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift);
@@ -232,8 +244,11 @@ namespace VideoCutCS
             }
         }
 
-        // タイムライン上でのホイール操作
-        private void Timeline_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
+        // タイムライン/プレイヤー上でのホイール
+        private void Timeline_PointerWheelChanged(object sender, PointerRoutedEventArgs e) => ProcessWheelEvent(e);
+        private void Player_PointerWheelChanged(object sender, PointerRoutedEventArgs e) => ProcessWheelEvent(e);
+
+        private void ProcessWheelEvent(PointerRoutedEventArgs e)
         {
             if (Player.MediaPlayer?.PlaybackSession == null) return;
 
@@ -243,75 +258,32 @@ namespace VideoCutCS
 
             if (isShiftPressed)
             {
-                // Shift + ホイール: 明示的にズーム
                 PerformZoomStep(delta);
                 e.Handled = true;
             }
             else
             {
-                // Shiftなし: シーク
-                // ★修正: デフォルト10秒、10倍以上で1秒、50倍以上で0.1秒
-                double baseStepSeconds = 10.0;
-                if (ZoomSlider != null)
-                {
-                    if (ZoomSlider.Value >= 50) baseStepSeconds = 0.1;
-                    else if (ZoomSlider.Value >= 10) baseStepSeconds = 1.0;
-                }
+                double stepSeconds = CalculateSeekSeconds();
+                bool isForward = (delta > 0);
+                if (AppSettings.Current.InvertMouseWheelSeek) isForward = !isForward;
 
-                // delta > 0 (奥/Up) -> 進む
-                double seekSeconds = (delta > 0) ? baseStepSeconds : -baseStepSeconds;
-                SeekRelative(TimeSpan.FromSeconds(seekSeconds));
-                e.Handled = true;
-            }
-        }
-
-        // プレイヤー上でのホイール操作
-        private void Player_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
-        {
-            if (Player.MediaPlayer?.PlaybackSession == null) return;
-
-            var shiftState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift);
-            bool isShiftPressed = (shiftState & CoreVirtualKeyStates.Down) == CoreVirtualKeyStates.Down;
-            var delta = e.GetCurrentPoint(null).Properties.MouseWheelDelta;
-
-            if (isShiftPressed)
-            {
-                // Shift + ホイール: 明示的にズーム
-                PerformZoomStep(delta);
-                e.Handled = true;
-            }
-            else
-            {
-                // Shiftなし: シーク
-                // ★修正: タイムラインと同じ感度ロジックを適用
-                double baseStepSeconds = 10.0;
-                if (ZoomSlider != null)
-                {
-                    if (ZoomSlider.Value >= 50) baseStepSeconds = 0.1;
-                    else if (ZoomSlider.Value >= 10) baseStepSeconds = 1.0;
-                }
-
-                // delta > 0 (奥/Up) -> 進む
-                double seekSeconds = (delta > 0) ? baseStepSeconds : -baseStepSeconds;
-                SeekRelative(TimeSpan.FromSeconds(seekSeconds));
+                double seekAmount = isForward ? stepSeconds : -stepSeconds;
+                SeekRelative(TimeSpan.FromSeconds(seekAmount));
                 e.Handled = true;
             }
         }
 
         // ----------------------------------------------------
-        // 位置計算・ツールチップ表示
+        // 位置計算・ツールチップ
         // ----------------------------------------------------
 
         private TimeSpan GetTimeFromX(double x)
         {
             if (TimelineArea.ActualWidth <= 0 || Player.MediaPlayer?.PlaybackSession == null) return TimeSpan.Zero;
-
             double width = TimelineArea.ActualWidth;
             var duration = Player.MediaPlayer.PlaybackSession.NaturalDuration;
-
             double clampedX = Math.Clamp(x, 0, width);
             double ratio = clampedX / width;
-
             return TimeSpan.FromMilliseconds(duration.TotalMilliseconds * ratio);
         }
 
@@ -320,7 +292,6 @@ namespace VideoCutCS
             if (TimelineArea.ActualWidth <= 0 || Player.MediaPlayer?.PlaybackSession == null) return 0;
             var duration = Player.MediaPlayer.PlaybackSession.NaturalDuration;
             if (duration.TotalMilliseconds <= 0) return 0;
-
             double ratio = time.TotalMilliseconds / duration.TotalMilliseconds;
             return TimelineArea.ActualWidth * ratio;
         }
@@ -335,16 +306,13 @@ namespace VideoCutCS
         {
             if (Player.MediaPlayer?.PlaybackSession == null) return;
             var point = e.GetCurrentPoint(TimelineArea);
-
             if (point.Properties.IsLeftButtonPressed)
             {
                 TimelineArea.CapturePointer(e.Pointer);
                 _isDraggingTimeline = true;
-
                 TimeSpan time = GetTimeFromX(point.Position.X);
                 if (Player.MediaPlayer.PlaybackSession.CanSeek)
                     Player.MediaPlayer.PlaybackSession.Position = time;
-
                 UpdatePlayhead(time);
             }
         }
@@ -352,10 +320,8 @@ namespace VideoCutCS
         private void Timeline_PointerMoved(object sender, PointerRoutedEventArgs e)
         {
             if (Player.MediaPlayer?.PlaybackSession == null) return;
-
             var pointOnTimeline = e.GetCurrentPoint(TimelineArea);
-            double currentX = pointOnTimeline.Position.X;
-            TimeSpan time = GetTimeFromX(currentX);
+            TimeSpan time = GetTimeFromX(pointOnTimeline.Position.X);
             HoverTooltipText.Text = time.ToString(@"hh\:mm\:ss\.fff");
 
             var transform = TimelineArea.TransformToVisual(TimelineContainer);
@@ -363,7 +329,6 @@ namespace VideoCutCS
 
             double tooltipWidth = HoverTooltip.ActualWidth > 0 ? HoverTooltip.ActualWidth : 80;
             double targetScreenX = screenPoint.X - (tooltipWidth / 2);
-
             double containerWidth = TimelineContainer.ActualWidth;
             if (targetScreenX < 0) targetScreenX = 0;
             else if (targetScreenX + tooltipWidth > containerWidth)
@@ -400,20 +365,17 @@ namespace VideoCutCS
                 SelectionRect.Visibility = Visibility.Collapsed;
                 return;
             }
-
             var duration = Player.MediaPlayer.PlaybackSession.NaturalDuration.TotalSeconds;
             if (duration <= 0) { SelectionRect.Visibility = Visibility.Collapsed; return; }
 
             double startSec = _startTime.TotalSeconds;
             double endSec = _isEndSet ? _endTime.TotalSeconds : duration;
-
             bool isFullRange = (startSec <= 0.1 && endSec >= duration - 0.1);
             if (isFullRange) { SelectionRect.Visibility = Visibility.Collapsed; return; }
 
             double totalWidth = TimelineArea.ActualWidth;
             double startRatio = startSec / duration;
             double durationRatio = (endSec - startSec) / duration;
-
             if (durationRatio < 0) { SelectionRect.Visibility = Visibility.Collapsed; return; }
 
             SelectionRect.Margin = new Thickness(totalWidth * startRatio, 0, 0, 0);
@@ -479,12 +441,9 @@ namespace VideoCutCS
             }
         }
 
-        // --- ZoomBox用の処理 ---
-
         private void ZoomBox_LostFocus(object sender, RoutedEventArgs e)
         {
             _isEditingZoom = false;
-            // 入力キャンセル時は元のスライダーの値に戻す
             if (ZoomSlider != null)
             {
                 _isUpdatingZoomByCode = true;
@@ -506,14 +465,12 @@ namespace VideoCutCS
         private void ApplyZoomFromText()
         {
             if (ZoomBox == null || ZoomSlider == null) return;
-
             string input = ZoomBox.Text.Replace("x", "").Replace(" ", "").Trim();
 
             if (double.TryParse(input, out double result))
             {
                 double clamped = Math.Clamp(result, ZoomSlider.Minimum, ZoomSlider.Maximum);
                 ZoomSlider.Value = clamped;
-
                 _isUpdatingZoomByCode = true;
                 ZoomBox.Text = $"x {clamped:F1}";
                 _isUpdatingZoomByCode = false;
@@ -632,10 +589,8 @@ namespace VideoCutCS
             {
                 StatusText.Text = "カット処理中...";
                 BtnCut.IsEnabled = false;
-
                 var engine = new FFmpegEngine();
                 string log = await engine.CutVideoAsync(_currentFilePath, file.Path, _startTime, finalEndTime);
-
                 StatusText.Text = "完了しました！";
                 BtnCut.IsEnabled = true;
                 Debug.WriteLine(log);
@@ -645,16 +600,13 @@ namespace VideoCutCS
         private async void SaveSnapshotLogic()
         {
             if (string.IsNullOrEmpty(_currentFilePath) || Player.MediaPlayer?.PlaybackSession == null) return;
-
             TimeSpan currentPosition = Player.MediaPlayer.PlaybackSession.Position;
-
             var savePicker = new FileSavePicker();
             var hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
             WinRT.Interop.InitializeWithWindow.Initialize(savePicker, hWnd);
 
             savePicker.SuggestedStartLocation = PickerLocationId.PicturesLibrary;
             savePicker.FileTypeChoices.Add("PNG Image", new System.Collections.Generic.List<string>() { ".png" });
-
             string timestamp = currentPosition.ToString(@"hh\-mm\-ss");
             string originalName = System.IO.Path.GetFileNameWithoutExtension(_currentFilePath);
             savePicker.SuggestedFileName = $"{originalName}_{timestamp}";
@@ -664,10 +616,8 @@ namespace VideoCutCS
             {
                 StatusText.Text = "画像を保存中...";
                 BtnSnapshot.IsEnabled = false;
-
                 var engine = new FFmpegEngine();
                 string log = await engine.SaveSnapshotAsync(_currentFilePath, file.Path, currentPosition);
-
                 StatusText.Text = "画像を保存しました！";
                 BtnSnapshot.IsEnabled = true;
                 Debug.WriteLine(log);
@@ -679,7 +629,6 @@ namespace VideoCutCS
             var openPicker = new FileOpenPicker();
             var hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
             WinRT.Interop.InitializeWithWindow.Initialize(openPicker, hWnd);
-
             openPicker.ViewMode = PickerViewMode.Thumbnail;
             openPicker.SuggestedStartLocation = PickerLocationId.VideosLibrary;
             foreach (var ext in new[] { ".mp4", ".mkv", ".mov", ".avi", ".ts" })
