@@ -258,7 +258,9 @@ namespace VideoCutCS
                     else if (ZoomSlider.Value > 10) baseStepSeconds = 0.1;
                 }
 
-                double seekSeconds = (delta > 0) ? -baseStepSeconds : baseStepSeconds;
+                // ★修正: delta > 0 (奥/Up) を プラス(進む) に変更
+                // 以前: (delta > 0) ? -baseStepSeconds : baseStepSeconds;
+                double seekSeconds = (delta > 0) ? baseStepSeconds : -baseStepSeconds;
                 SeekRelative(TimeSpan.FromSeconds(seekSeconds));
                 e.Handled = true;
             }
@@ -282,7 +284,8 @@ namespace VideoCutCS
             else
             {
                 // Shiftなし: シーク
-                double seekSeconds = (delta > 0) ? -1 : 1;
+                // ★修正: delta > 0 (奥/Up) を プラス(進む) に変更
+                double seekSeconds = (delta > 0) ? 1 : -1;
                 SeekRelative(TimeSpan.FromSeconds(seekSeconds));
                 e.Handled = true;
             }
