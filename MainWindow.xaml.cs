@@ -250,16 +250,15 @@ namespace VideoCutCS
             else
             {
                 // Shiftなし: シーク
-                double baseStepSeconds = 1.0;
+                // ★修正: デフォルト10秒、10倍以上で1秒、50倍以上で0.1秒
+                double baseStepSeconds = 10.0;
                 if (ZoomSlider != null)
                 {
-                    if (ZoomSlider.Value > 50) baseStepSeconds = 0.01;
-                    else if (ZoomSlider.Value > 20) baseStepSeconds = 0.05;
-                    else if (ZoomSlider.Value > 10) baseStepSeconds = 0.1;
+                    if (ZoomSlider.Value >= 50) baseStepSeconds = 0.1;
+                    else if (ZoomSlider.Value >= 10) baseStepSeconds = 1.0;
                 }
 
-                // ★修正: delta > 0 (奥/Up) を プラス(進む) に変更
-                // 以前: (delta > 0) ? -baseStepSeconds : baseStepSeconds;
+                // delta > 0 (奥/Up) -> 進む
                 double seekSeconds = (delta > 0) ? baseStepSeconds : -baseStepSeconds;
                 SeekRelative(TimeSpan.FromSeconds(seekSeconds));
                 e.Handled = true;
@@ -284,8 +283,16 @@ namespace VideoCutCS
             else
             {
                 // Shiftなし: シーク
-                // ★修正: delta > 0 (奥/Up) を プラス(進む) に変更
-                double seekSeconds = (delta > 0) ? 1 : -1;
+                // ★修正: タイムラインと同じ感度ロジックを適用
+                double baseStepSeconds = 10.0;
+                if (ZoomSlider != null)
+                {
+                    if (ZoomSlider.Value >= 50) baseStepSeconds = 0.1;
+                    else if (ZoomSlider.Value >= 10) baseStepSeconds = 1.0;
+                }
+
+                // delta > 0 (奥/Up) -> 進む
+                double seekSeconds = (delta > 0) ? baseStepSeconds : -baseStepSeconds;
                 SeekRelative(TimeSpan.FromSeconds(seekSeconds));
                 e.Handled = true;
             }
