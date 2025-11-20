@@ -10,7 +10,8 @@
           AllowDrop="True"
           DragOver="MainRoot_DragOver"
           Drop="MainRoot_Drop"
-          Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+          Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+          PointerWheelChanged="MainRoot_PointerWheelChanged">
 
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="Left" Invoked="Shortcut_SeekBack5s"/>
@@ -29,7 +30,6 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- メニューバー -->
         <MenuBar Grid.Row="0">
             <MenuBarItem Title="ファイル(F)">
                 <MenuFlyoutItem Text="開く(O)..." Click="MenuOpen_Click" Icon="OpenFile"/>
@@ -38,7 +38,6 @@
             </MenuBarItem>
         </MenuBar>
 
-        <!-- 動画プレイヤーとガイド表示 -->
         <MediaPlayerElement x:Name="Player"
                             Grid.Row="1"
                             HorizontalAlignment="Stretch"
@@ -59,78 +58,85 @@
                        Foreground="Gray"/>
         </StackPanel>
 
-        <!-- 操作パネル -->
         <StackPanel Grid.Row="2"
                     Orientation="Vertical"
                     Padding="20"
                     Spacing="10"
                     Background="#202020">
 
-            <!-- タイムラインと時間表示 -->
             <Grid Margin="0,0,0,10">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- 自作タイムライン -->
-                <Grid x:Name="TimelineArea"
-                      Grid.Column="0"
-                      Height="30"
-                      VerticalAlignment="Center"
-                      Margin="0,0,15,0"
-                      Background="Transparent"
-                      PointerPressed="Timeline_PointerPressed"
-                      PointerMoved="Timeline_PointerMoved"
-                      PointerReleased="Timeline_PointerReleased"
-                      PointerExited="Timeline_PointerExited"
-                      SizeChanged="Timeline_SizeChanged">
+                <Grid x:Name="TimelineContainer" 
+                      Grid.Column="0" 
+                      Height="80" 
+                      Margin="0,0,15,0" 
+                      VerticalAlignment="Bottom">
 
-                    <!-- 背景バー -->
-                    <Rectangle x:Name="TimelineBackground"
-                               Fill="#606060"
-                               Height="6"
-                               RadiusX="3" RadiusY="3"
-                               VerticalAlignment="Center"
-                               HorizontalAlignment="Stretch"
-                               IsHitTestVisible="False"
-                               Margin="0"/>
+                    <ScrollViewer x:Name="TimelineScrollViewer"
+                                  HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Disabled"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Bottom"
+                                  Height="45"
+                                  SizeChanged="TimelineScrollViewer_SizeChanged">
 
-                    <!-- 選択範囲（黄色） -->
-                    <Rectangle x:Name="SelectionRect"
-                               Fill="#FFD60A"
-                               Height="6"
-                               RadiusX="3" RadiusY="3"
-                               VerticalAlignment="Center"
-                               HorizontalAlignment="Left"
-                               Visibility="Collapsed"
-                               IsHitTestVisible="False"/>
+                        <Grid x:Name="TimelineArea"
+                              Height="30"
+                              VerticalAlignment="Top"
+                              HorizontalAlignment="Left"
+                              Background="Transparent"
+                              PointerPressed="Timeline_PointerPressed"
+                              PointerMoved="Timeline_PointerMoved"
+                              PointerReleased="Timeline_PointerReleased"
+                              PointerExited="Timeline_PointerExited"
+                              PointerWheelChanged="Timeline_PointerWheelChanged">
 
-                    <!-- 再生ヘッド -->
-                    <Grid x:Name="Playhead"
-                          HorizontalAlignment="Left"
-                          VerticalAlignment="Stretch"
-                          Width="20"
-                          IsHitTestVisible="False">
-                        <Grid.RenderTransform>
-                            <TranslateTransform x:Name="PlayheadTransform" X="0"/>
-                        </Grid.RenderTransform>
-                        <Rectangle Width="2" Fill="White" HorizontalAlignment="Center" VerticalAlignment="Stretch" Margin="0,5,0,5"/>
-                        <Ellipse Width="14" Height="14" Fill="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Grid>
+                            <Rectangle x:Name="TimelineBackground"
+                                       Fill="#606060"
+                                       Height="6"
+                                       RadiusX="3" RadiusY="3"
+                                       VerticalAlignment="Center"
+                                       HorizontalAlignment="Stretch"
+                                       IsHitTestVisible="False"
+                                       Margin="0"/>
 
-                    <!-- 自作ツールチップ -->
+                            <Rectangle x:Name="SelectionRect"
+                                       Fill="#FFD60A"
+                                       Height="6"
+                                       RadiusX="3" RadiusY="3"
+                                       VerticalAlignment="Center"
+                                       HorizontalAlignment="Left"
+                                       Visibility="Collapsed"
+                                       IsHitTestVisible="False"/>
+
+                            <Grid x:Name="Playhead"
+                                  HorizontalAlignment="Left"
+                                  VerticalAlignment="Stretch"
+                                  Width="20"
+                                  IsHitTestVisible="False">
+                                <Grid.RenderTransform>
+                                    <TranslateTransform x:Name="PlayheadTransform" X="0"/>
+                                </Grid.RenderTransform>
+                                <Rectangle Width="2" Fill="White" HorizontalAlignment="Center" VerticalAlignment="Stretch" Margin="0,5,0,5"/>
+                                <Ellipse Width="14" Height="14" Fill="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Grid>
+                    </ScrollViewer>
+
                     <Grid x:Name="HoverTooltip"
                           VerticalAlignment="Top"
                           HorizontalAlignment="Left"
                           Visibility="Collapsed"
                           IsHitTestVisible="False"
-                          Margin="0,-45,0,0">
+                          Margin="0,5,0,0">
                         <Grid.RenderTransform>
                             <TranslateTransform x:Name="HoverTooltipTransform" X="0"/>
                         </Grid.RenderTransform>
 
-                        <!-- 吹き出し本体 -->
                         <Border Background="#CC000000" CornerRadius="4" Padding="8,4">
                             <TextBlock x:Name="HoverTooltipText" 
                                        Text="00:00:00" 
@@ -138,8 +144,6 @@
                                        FontSize="12"
                                        FontWeight="SemiBold"/>
                         </Border>
-
-                        <!-- 下向きの三角 -->
                         <Polygon Points="0,0 6,6 12,0" 
                                  Fill="#CC000000" 
                                  HorizontalAlignment="Center" 
@@ -148,8 +152,30 @@
                     </Grid>
                 </Grid>
 
-                <!-- 時間表示テキスト -->
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="5">
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
+
+                    <StackPanel Orientation="Vertical" VerticalAlignment="Center" Width="100">
+                        <TextBox x:Name="ZoomBox"
+                                 Text="x 1.0"
+                                 FontSize="12"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Foreground="Gray"
+                                 HorizontalAlignment="Center"
+                                 TextAlignment="Center"
+                                 GotFocus="Shared_TextBox_GotFocus"
+                                 LostFocus="ZoomBox_LostFocus"
+                                 KeyDown="ZoomBox_KeyDown"/>
+
+                        <Slider x:Name="ZoomSlider" 
+                                Minimum="1.0" Maximum="100.0" Value="1.0" 
+                                StepFrequency="0.1"
+                                ValueChanged="ZoomSlider_ValueChanged"
+                                Width="100"/>
+                    </StackPanel>
+
+                    <Border Width="1" Height="20" Background="Gray" Margin="5,0"/>
+
                     <TextBox x:Name="TimeBox"
                              Text="00:00:00"
                              Width="100"
@@ -169,7 +195,6 @@
                 </StackPanel>
             </Grid>
 
-            <!-- カット範囲設定（開始/終了） -->
             <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
                 <TextBlock Text="開始:" FontSize="16" Foreground="LightGray" VerticalAlignment="Center"/>
                 <TextBox x:Name="TextStartTime" Text="00:00:00.000" Width="120" FontSize="16" Background="Transparent" BorderThickness="0,0,0,1" Foreground="White" 
@@ -188,7 +213,6 @@
                 <TextBlock x:Name="TextDuration" Text="(長さ: 00:00:00.000)" FontSize="16" Foreground="Gray" VerticalAlignment="Center" Margin="10,0,0,0"/>
             </StackPanel>
 
-            <!-- 操作ボタン群 -->
             <StackPanel Orientation="Horizontal" Spacing="15" HorizontalAlignment="Center">
                 <Button x:Name="BtnPlayPause" Click="BtnPlayPause_Click" Width="60" Height="40" ToolTipService.ToolTip="再生/一時停止 (Space)">
                     <SymbolIcon x:Name="IconPlayPause" Symbol="Play"/>
