@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "VideoCutCS (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "VideoCutCS (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
