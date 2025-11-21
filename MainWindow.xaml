@@ -22,6 +22,8 @@
             <KeyboardAccelerator Key="F" Invoked="Shortcut_SetEnd"/>
             <KeyboardAccelerator Key="Space" Invoked="Shortcut_PlayPause"/>
             <KeyboardAccelerator Key="S" Invoked="Shortcut_Snapshot"/>
+            <KeyboardAccelerator Key="Left" Modifiers="Menu" Invoked="Shortcut_PrevKeyframe"/>
+            <KeyboardAccelerator Key="Right" Modifiers="Menu" Invoked="Shortcut_NextKeyframe"/>
         </Grid.KeyboardAccelerators>
 
         <Grid.RowDefinitions>
@@ -35,6 +37,18 @@
                 <MenuFlyoutItem Text="開く(O)..." Click="MenuOpen_Click" Icon="OpenFile"/>
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="終了(X)" Click="MenuExit_Click" Icon="Cancel"/>
+            </MenuBarItem>
+
+            <MenuBarItem Title="オプション(O)">
+                <ToggleMenuFlyoutItem x:Name="MenuSmartCut" 
+                                      Text="スマートカットを使用 (高精度)" 
+                                      IsChecked="True" 
+                                      Click="MenuSmartCut_Click" />
+                <MenuFlyoutSeparator />
+                <ToggleMenuFlyoutItem x:Name="MenuSnapToKeyframe"
+                                      Text="キーフレームに吸着"
+                                      IsChecked="True"
+                                      Click="MenuSnapToKeyframe_Click"/>
             </MenuBarItem>
         </MenuBar>
 
@@ -82,7 +96,9 @@
                                   HorizontalAlignment="Stretch"
                                   VerticalAlignment="Bottom"
                                   Height="45"
-                                  SizeChanged="TimelineScrollViewer_SizeChanged">
+                                  SizeChanged="TimelineScrollViewer_SizeChanged"
+                                  PointerEntered="TimelineScrollViewer_PointerEntered"
+                                  PointerExited="TimelineScrollViewer_PointerExited">
 
                         <Grid x:Name="TimelineArea"
                               Height="30"
@@ -222,6 +238,17 @@
                 </Button>
 
                 <Border Width="20"/>
+
+                <StackPanel Orientation="Horizontal" Spacing="5">
+                    <Button x:Name="BtnPrevKeyframe" Click="BtnPrevKeyframe_Click" Width="40" Height="40" ToolTipService.ToolTip="前のキーフレームへ (Alt+Left)" IsEnabled="False">
+                        <SymbolIcon Symbol="Previous"/>
+                    </Button>
+                    <Button x:Name="BtnNextKeyframe" Click="BtnNextKeyframe_Click" Width="40" Height="40" ToolTipService.ToolTip="次のキーフレームへ (Alt+Right)" IsEnabled="False">
+                        <SymbolIcon Symbol="Next"/>
+                    </Button>
+                </StackPanel>
+
+                <Border Width="10"/>
 
                 <Button x:Name="BtnSetStart" Content="[ 開始位置 (I) ]" Click="BtnSetStart_Click" Width="120"/>
                 <Button x:Name="BtnSetEnd"   Content="[ 終了位置 (F) ]" Click="BtnSetEnd_Click"   Width="120"/>
