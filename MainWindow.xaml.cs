@@ -45,6 +45,8 @@ namespace VideoCutCS
         private bool _isDraggingTimeline = false;
         private bool _skipZoomHandler = false;
         private bool _isEditingZoom = false;
+        private bool _skipSpeedHandler = false;
+        private bool _isEditingSpeed = false;
         private bool _isHoveringTimeline = false;
 
         public MainWindow()
@@ -174,6 +176,11 @@ namespace VideoCutCS
                 ZoomSlider.Value = AppSettings.Current.ZoomMin;
                 ZoomBox.Text = $"x {AppSettings.Current.ZoomMin:F1}";
                 _skipZoomHandler = false;
+                _skipSpeedHandler = true;
+                SpeedSlider.Value = 1.0;
+                SpeedBox.Text = "x 1.0";
+                _skipSpeedHandler = false;
+                sender.PlaybackSession.PlaybackRate = 1.0;
                 UpdateTimelineWidth();
                 UpdateLabels();
             });
@@ -615,6 +622,7 @@ namespace VideoCutCS
             else if (object.ReferenceEquals(sender, TextStartTime)) _isEditingStart = true;
             else if (object.ReferenceEquals(sender, TextEndTime)) _isEditingEnd = true;
             else if (object.ReferenceEquals(sender, ZoomBox)) _isEditingZoom = true;
+            else if (object.ReferenceEquals(sender, SpeedBox)) _isEditingSpeed = true;
 
             if (sender is TextBox tb) tb.SelectAll();
         }
@@ -655,6 +663,48 @@ namespace VideoCutCS
                 ZoomBox.Text = $"x {ZoomSlider.Value:F1}";
             }
             _isEditingZoom = false;
+            MainRoot.Focus(FocusState.Programmatic);
+        }
+
+        private void SpeedSlider_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        {
+            if (_skipSpeedHandler) return;
+            if (!_isEditingSpeed)
+            {
+                SpeedBox.Text = $"x {e.NewValue:F1}";
+            }
+            if (Player.MediaPlayer?.PlaybackSession != null)
+            {
+                Player.MediaPlayer.PlaybackSession.PlaybackRate = e.NewValue;
+            }
+        }
+
+        private void SpeedBox_LostFocus(object sender, RoutedEventArgs e)
+        {
+            ApplySpeedFromText();
+            _isEditingSpeed = false;
+        }
+
+        private void SpeedBox_KeyDown(object sender, KeyRoutedEventArgs e)
+        {
+            if (e.Key == VirtualKey.Enter) ApplySpeedFromText();
+        }
+
+        private void ApplySpeedFromText()
+        {
+            if (SpeedBox == null || SpeedSlider == null) return;
+            string input = SpeedBox.Text.Replace("x", "").Replace(" ", "").Trim();
+
+            if (double.TryParse(input, out double result))
+            {
+                SpeedSlider.Value = Math.Clamp(result, SpeedSlider.Minimum, SpeedSlider.Maximum);
+            }
+            else
+            {
+                SetStatus("エラー: 有効な速度を入力してください", true);
+                SpeedBox.Text = $"x {SpeedSlider.Value:F1}";
+            }
+            _isEditingSpeed = false;
             MainRoot.Focus(FocusState.Programmatic);
         }
 

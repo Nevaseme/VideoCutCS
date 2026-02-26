@@ -11,7 +11,8 @@
           DragOver="MainRoot_DragOver"
           Drop="MainRoot_Drop"
           Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
-          PointerWheelChanged="MainRoot_PointerWheelChanged">
+          PointerWheelChanged="MainRoot_PointerWheelChanged"
+          KeyboardAcceleratorPlacementMode="Hidden">
 
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="Left" Invoked="Shortcut_SeekBack5s"/>
@@ -183,10 +184,29 @@
                                  LostFocus="ZoomBox_LostFocus"
                                  KeyDown="ZoomBox_KeyDown"/>
 
-                        <Slider x:Name="ZoomSlider" 
-                                Minimum="1.0" Maximum="100.0" Value="1.0" 
+                        <Slider x:Name="ZoomSlider"
+                                Minimum="1.0" Maximum="100.0" Value="1.0"
                                 StepFrequency="0.1"
                                 ValueChanged="ZoomSlider_ValueChanged"
+                                Width="100"/>
+
+                        <TextBox x:Name="SpeedBox"
+                                 Text="x 1.0"
+                                 FontSize="12"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Foreground="Gray"
+                                 HorizontalAlignment="Center"
+                                 TextAlignment="Center"
+                                 Margin="0,6,0,0"
+                                 GotFocus="Shared_TextBox_GotFocus"
+                                 LostFocus="SpeedBox_LostFocus"
+                                 KeyDown="SpeedBox_KeyDown"/>
+
+                        <Slider x:Name="SpeedSlider"
+                                Minimum="0.1" Maximum="10.0" Value="1.0"
+                                StepFrequency="0.1"
+                                ValueChanged="SpeedSlider_ValueChanged"
                                 Width="100"/>
                     </StackPanel>
 
