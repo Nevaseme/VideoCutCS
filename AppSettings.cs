@@ -28,5 +28,8 @@ namespace VideoCutCS
         // デフォルト: 吸着ON (高速・安全), スマートカットOFF
         public bool SnapToKeyframes { get; set; } = true;
         public bool UseSmartCut { get; set; } = false;
+
+        // --- ハードウェアアクセラレーション ---
+        public bool UseHardwareAccel { get; set; } = false;
     }
 }

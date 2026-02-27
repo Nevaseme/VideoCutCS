@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Linq;
 using System.Globalization;
@@ -13,6 +14,10 @@ namespace VideoCutCS
 		private readonly string _ffmpegPath;
 		private readonly string _ffprobePath;
 
+		// ハードウェアエンコーダー検出キャッシュ
+		private string? _cachedHwEncoder;
+		private bool _hwEncoderDetected;
+
 		public FFmpegEngine()
 		{
 			// ★重要変更: 単一EXE化した場合、AppDomain...BaseDirectoryは一時フォルダを指すことがある。
@@ -23,10 +28,6 @@ namespace VideoCutCS
 			_ffmpegPath = Path.Combine(baseDir, "ffmpeg.exe");
 			_ffprobePath = Path.Combine(baseDir, "ffprobe.exe");
 		}
-
-		// =========================================================
-		// 以下、ロジックに変更はありません (そのまま使用)
-		// =========================================================
 
 		public async Task<string> GetFFmpegVersionAsync()
 		{
@@ -42,8 +43,71 @@ namespace VideoCutCS
 
 		public async Task<string> CutVideoSimpleAsync(string inputPath, string outputPath, TimeSpan start, TimeSpan end)
 		{
-			string args = $"-ss {start} -i \"{inputPath}\" -to {end} -c copy -map 0 -y \"{outputPath}\"";
+			var duration = end - start;
+			string args = $"-ss {start} -i \"{inputPath}\" -t {duration} -c copy -map 0 -avoid_negative_ts make_zero -y \"{outputPath}\"";
 			return await ExecuteFFmpegCommandAsync(_ffmpegPath, args);
+		}
+
+		/// <summary>
+		/// 複数セグメントをカットして1ファイルに結合する。
+		/// </summary>
+		public async Task<string> BatchCutAndMergeAsync(
+			string inputPath,
+			string outputPath,
+			IReadOnlyList<VideoSegment> segments,
+			IProgress<(int current, int total)>? progress = null,
+			CancellationToken cancellationToken = default)
+		{
+			if (segments.Count == 0) return "エラー: セグメントが空です。";
+
+			// 1セグメントの場合は通常カットを実行
+			if (segments.Count == 1)
+			{
+				progress?.Report((1, 1));
+				return await CutVideoSimpleAsync(inputPath, outputPath, segments[0].Start, segments[0].End);
+			}
+
+			string tempDir = Path.GetDirectoryName(outputPath) ?? "";
+			string id = Guid.NewGuid().ToString("N")[..8];
+			var tempFiles = new List<string>();
+			string tempList = Path.Combine(tempDir, $"temp_batchlist_{id}.txt");
+
+			try
+			{
+				int total = segments.Count + 1; // +1 は結合ステップ分
+
+				for (int i = 0; i < segments.Count; i++)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					string tempFile = Path.Combine(tempDir, $"temp_bseg{i}_{id}.mp4");
+					tempFiles.Add(tempFile);
+					await CutVideoSimpleAsync(inputPath, tempFile, segments[i].Start, segments[i].End);
+					progress?.Report((i + 1, total));
+				}
+
+				cancellationToken.ThrowIfCancellationRequested();
+				string listContent = string.Join("\n", tempFiles.Select(f => $"file '{Path.GetFileName(f)}'"));
+				await File.WriteAllTextAsync(tempList, listContent, cancellationToken);
+
+				string argsConcat = $"-f concat -safe 0 -i \"{tempList}\" -c copy -y \"{outputPath}\"";
+				progress?.Report((total, total));
+				await ExecuteFFmpegCommandAsync(_ffmpegPath, argsConcat, workingDirectory: tempDir);
+
+				return $"バッチカット完了 ({segments.Count} セグメント)";
+			}
+			catch (OperationCanceledException)
+			{
+				throw;
+			}
+			catch (Exception ex)
+			{
+				return $"バッチカット エラー: {ex.Message}";
+			}
+			finally
+			{
+				foreach (var f in tempFiles) DeleteFile(f);
+				DeleteFile(tempList);
+			}
 		}
 
 		public async Task<VideoInfo> GetVideoInfoAsync(string inputPath)
@@ -58,7 +122,7 @@ namespace VideoCutCS
 			return info;
 		}
 
-		public async Task<List<TimeSpan>> GetKeyframesAsync(string inputPath)
+		public async Task<List<TimeSpan>> GetKeyframesAsync(string inputPath, CancellationToken cancellationToken = default)
 		{
 			var keyframes = new List<TimeSpan>();
 			if (!File.Exists(_ffprobePath)) return keyframes;
@@ -69,29 +133,57 @@ namespace VideoCutCS
 			using (var process = new Process { StartInfo = startInfo })
 			{
 				process.Start();
-				var errorTask = process.StandardError.ReadToEndAsync();
-
-				string? line;
-				while ((line = await process.StandardOutput.ReadLineAsync()) != null)
+				try
 				{
-					if (string.IsNullOrWhiteSpace(line)) continue;
-					var parts = line.Split(',');
-					if (parts.Length >= 2 && parts[1].Contains("K"))
+					var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+
+					string? line;
+					while ((line = await process.StandardOutput.ReadLineAsync(cancellationToken)) != null)
 					{
-						if (double.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out double sec))
+						if (string.IsNullOrWhiteSpace(line)) continue;
+						var parts = line.Split(',');
+						if (parts.Length >= 2 && parts[1].Contains("K"))
 						{
-							keyframes.Add(TimeSpan.FromSeconds(sec));
+							if (double.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out double sec))
+							{
+								keyframes.Add(TimeSpan.FromSeconds(sec));
+							}
 						}
 					}
+					await Task.WhenAll(errorTask, process.WaitForExitAsync(cancellationToken));
 				}
-				await Task.WhenAll(errorTask, process.WaitForExitAsync());
+				catch (OperationCanceledException)
+				{
+					process.Kill(entireProcessTree: true);
+					throw;
+				}
 			}
 			return keyframes.OrderBy(x => x).ToList();
 		}
 
+		/// <summary>
+		/// 利用可能なハードウェアエンコーダーを検出して返す。見つからなければ null。
+		/// 結果はキャッシュされるため2回目以降は即座に返る。
+		/// </summary>
+		public async Task<string?> DetectHardwareEncoderAsync()
+		{
+			if (_hwEncoderDetected) return _cachedHwEncoder;
+			if (!File.Exists(_ffmpegPath)) { _hwEncoderDetected = true; return null; }
+
+			string output = await ExecuteCommandGetOutputAsync(_ffmpegPath, "-hide_banner -encoders");
+			string[] candidates = ["h264_nvenc", "h264_qsv", "h264_amf"];
+			_cachedHwEncoder = candidates.FirstOrDefault(e => output.Contains(e, StringComparison.OrdinalIgnoreCase));
+			_hwEncoderDetected = true;
+			return _cachedHwEncoder;
+		}
+
 		public async Task<string> SmartCutVideoAsync(string inputPath, string outputPath, TimeSpan start, TimeSpan end, List<TimeSpan> keyframes)
 		{
-			var nextKeyframe = keyframes.FirstOrDefault(k => k > start);
+			// BinarySearchでO(log n)の次キーフレーム検索
+			int idx = keyframes.BinarySearch(start);
+			if (idx >= 0) idx++;  // 完全一致 → 次のインデックスへ
+			else idx = ~idx;      // 見つからない → 挿入点 = startより大きい最初の要素
+			var nextKeyframe = idx < keyframes.Count ? keyframes[idx] : TimeSpan.Zero;
 			bool isSimpleCut = (nextKeyframe == TimeSpan.Zero) || (nextKeyframe >= end) || ((nextKeyframe - start).TotalSeconds < 0.2);
 
 			if (isSimpleCut)
@@ -106,7 +198,7 @@ namespace VideoCutCS
 		{
 			Debug.WriteLine($"[SmartCut] 処理開始: Start={start} -> Split={splitPoint} -> End={end}");
 			string tempDir = Path.GetDirectoryName(outputPath) ?? "";
-			string id = Guid.NewGuid().ToString("N").Substring(0, 8);
+			string id = Guid.NewGuid().ToString("N")[..8];
 			string tempPartA = Path.Combine(tempDir, $"temp_A_{id}.mp4");
 			string tempPartB = Path.Combine(tempDir, $"temp_B_{id}.mp4");
 			string tempList = Path.Combine(tempDir, $"temp_list_{id}.txt");
@@ -115,8 +207,7 @@ namespace VideoCutCS
 			{
 				var info = await GetVideoInfoAsync(inputPath);
 				string argsA = $"-ss {start} -to {splitPoint} -i \"{inputPath}\" " +
-							   $"-c:v libx264 -preset fast -crf 23 -video_track_timescale 90000 " +
-							   (info.IsValid ? $"-b:v {info.BitRate} " : "") +
+							   BuildVideoEncoderArgs(info) +
 							   $"-c:a copy -y \"{tempPartA}\"";
 				string argsB = $"-ss {splitPoint} -to {end} -i \"{inputPath}\" " +
 							   $"-c copy -video_track_timescale 90000 -y \"{tempPartB}\"";
@@ -145,6 +236,26 @@ namespace VideoCutCS
 			}
 		}
 
+		/// <summary>
+		/// 設定と検出済みエンコーダーに応じてビデオエンコーダー引数を組み立てる。
+		/// </summary>
+		private string BuildVideoEncoderArgs(VideoInfo info)
+		{
+			string bitrateArg = info.IsValid ? $"-b:v {info.BitRate} " : "";
+
+			if (AppSettings.Current.UseHardwareAccel && _cachedHwEncoder != null)
+			{
+				return _cachedHwEncoder switch
+				{
+					"h264_nvenc" => $"-c:v h264_nvenc -preset p4 -rc vbr -cq:v 23 {bitrateArg}-video_track_timescale 90000 ",
+					"h264_qsv"   => $"-c:v h264_qsv -global_quality 23 -preset medium {bitrateArg}-video_track_timescale 90000 ",
+					"h264_amf"   => $"-c:v h264_amf -quality balanced -qp_i 23 -qp_p 23 {bitrateArg}-video_track_timescale 90000 ",
+					_            => $"-c:v libx264 -preset fast -crf 23 {bitrateArg}-video_track_timescale 90000 "
+				};
+			}
+			return $"-c:v libx264 -preset fast -crf 23 {bitrateArg}-video_track_timescale 90000 ";
+		}
+
 		private async Task<string> ExecuteFFmpegCommandAsync(string exePath, string args, string? workingDirectory = null)
 		{
 			var startInfo = CreateStartInfo(exePath, args, workingDirectory);
@@ -156,6 +267,18 @@ namespace VideoCutCS
 				await Task.WhenAll(stdoutTask, stderrTask, p.WaitForExitAsync());
 				return await stderrTask;
 			}
+		}
+
+		/// <summary>stdout と stderr を結合して返す。エンコーダー一覧取得など stdout が必要な場合に使用。</summary>
+		private async Task<string> ExecuteCommandGetOutputAsync(string exePath, string args)
+		{
+			var startInfo = CreateStartInfo(exePath, args);
+			using var p = new Process { StartInfo = startInfo };
+			p.Start();
+			var stdoutTask = p.StandardOutput.ReadToEndAsync();
+			var stderrTask = p.StandardError.ReadToEndAsync();
+			await Task.WhenAll(stdoutTask, stderrTask, p.WaitForExitAsync());
+			return await stdoutTask + await stderrTask;
 		}
 
 		private ProcessStartInfo CreateStartInfo(string fileName, string args, string? workingDirectory = null)
@@ -172,19 +295,19 @@ namespace VideoCutCS
 			};
 		}
 
-		private void ParseVideoInfo(string rawOutput, VideoInfo info)
+		internal void ParseVideoInfo(string rawOutput, VideoInfo info)
 		{
-			foreach (var line in rawOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+			foreach (var line in rawOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
 			{
-				var parts = line.Split('=');
+				var parts = line.Split('=', StringSplitOptions.TrimEntries);
 				if (parts.Length != 2) continue;
-				string val = parts[1].Trim();
-				switch (parts[0].Trim())
+				string val = parts[1];
+				switch (parts[0])
 				{
-					case "width": info.Width = int.Parse(val); break;
-					case "height": info.Height = int.Parse(val); break;
+					case "width": if (int.TryParse(val, out int w)) info.Width = w; break;
+					case "height": if (int.TryParse(val, out int h)) info.Height = h; break;
 					case "codec_name": info.VideoCodec = val; break;
-					case "bit_rate": info.BitRate = long.Parse(val); break;
+					case "bit_rate": if (long.TryParse(val, out long br)) info.BitRate = br; break;
 					case "r_frame_rate":
 						var frParts = val.Split('/');
 						if (frParts.Length == 2 && double.TryParse(frParts[0], out double n) && double.TryParse(frParts[1], out double d) && d != 0)
