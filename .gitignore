@@ -470,3 +470,6 @@ ffmpeg.exeなどの巨大なバイナリはGitに含めず、
 実行環境ごとに手動で配置します。
 
 Executables/
+# FFmpeg binaries (CI でダウンロードするためリポジトリには含めない)
+Executables/ffmpeg.exe
+Executables/ffprobe.exe

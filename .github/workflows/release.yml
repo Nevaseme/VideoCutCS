@@ -1,0 +1,47 @@
+﻿name: Build and Release
+
+# v から始まるタグ (例: v1.0.0) をプッシュしたときに実行
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # Release の作成・ファイルアップロードに必要
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # ffmpeg / ffprobe をダウンロードして Executables フォルダに配置
+      - name: Download FFmpeg
+        run: |
+          $url = "https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_tmp
+          New-Item -ItemType Directory -Path Executables -Force | Out-Null
+          Copy-Item "ffmpeg_tmp\ffmpeg-7.1-essentials_build\bin\ffmpeg.exe"  -Destination "Executables\ffmpeg.exe"
+          Copy-Item "ffmpeg_tmp\ffmpeg-7.1-essentials_build\bin\ffprobe.exe" -Destination "Executables\ffprobe.exe"
+
+      - name: Publish (win-x64, self-contained)
+        run: dotnet publish VideoCutCS.csproj -c Release -r win-x64 --self-contained -o publish/
+
+      # publish フォルダをZIPにまとめる
+      - name: Create ZIP archive
+        run: Compress-Archive -Path publish\* -DestinationPath "VideoCutCS-${{ github.ref_name }}-win-x64.zip"
+
+      # GitHub Release を自動作成してZIPを添付
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: VideoCutCS-${{ github.ref_name }}-win-x64.zip
+          generate_release_notes: true   # コミット履歴からリリースノートを自動生成
