@@ -32,22 +32,27 @@
                 <MenuFlyoutItem Text="終了(X)" Click="MenuExit_Click" Icon="Cancel"/>
             </MenuBarItem>
 
-            <MenuBarItem Title="オプション(O)">
-                <ToggleMenuFlyoutItem x:Name="MenuSmartCut" 
-                                      Text="スマートカットを使用 (高精度)" 
-                                      IsChecked="True" 
-                                      Click="MenuSmartCut_Click" />
-                <MenuFlyoutSeparator />
+            <MenuBarItem Title="カット方式(C)">
                 <ToggleMenuFlyoutItem x:Name="MenuSnapToKeyframe"
-                                      Text="キーフレームに吸着"
+                                      Text="キーフレーム吸着　高速・高精度（推奨）"
                                       IsChecked="True"
                                       Click="MenuSnapToKeyframe_Click"/>
+                <ToggleMenuFlyoutItem x:Name="MenuSmartCut"
+                                      Text="スマートカット　フレーム精度優先（低速・再エンコードあり）"
+                                      IsChecked="False"
+                                      Click="MenuSmartCut_Click" />
                 <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="※ どちらも OFF のとき → 通常の高速カット" IsEnabled="False"/>
+            </MenuBarItem>
+
+            <MenuBarItem Title="エンコード(E)">
                 <ToggleMenuFlyoutItem x:Name="MenuHardwareAccel"
                                       Text="ハードウェアエンコード (検出中...)"
                                       IsChecked="False"
                                       IsEnabled="False"
                                       Click="MenuHardwareAccel_Click"/>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="※ スマートカット ON のときのみ有効" IsEnabled="False"/>
             </MenuBarItem>
         </MenuBar>
 

@@ -66,6 +66,9 @@ namespace VideoCutCS
         // バッチカットのキャンセル管理
         private CancellationTokenSource? _batchCts;
 
+        // HWエンコーダーが利用可能かどうか（CheckEnvironment で設定）
+        private bool _hwEncoderAvailable = false;
+
         // セグメントリスト
         private readonly ObservableCollection<VideoSegment> _segments = new();
         private readonly List<Rectangle> _segmentRects = new();
@@ -154,8 +157,9 @@ namespace VideoCutCS
             {
                 if (hwEncoder != null)
                 {
+                    _hwEncoderAvailable = true;
                     MenuHardwareAccel.Text = $"ハードウェアエンコード ({hwEncoder})";
-                    MenuHardwareAccel.IsEnabled = true;
+                    MenuHardwareAccel.IsEnabled = AppSettings.Current.UseSmartCut;
                 }
                 else
                 {
@@ -675,19 +679,24 @@ namespace VideoCutCS
 
 		// トグル系ロジック
 		private void MenuSmartCut_Click(object sender, RoutedEventArgs e)
-        {
-            if (sender is ToggleMenuFlyoutItem item)
-            {
-                AppSettings.Current.UseSmartCut = item.IsChecked;
-                if (item.IsChecked)
-                {
-                    AppSettings.Current.SnapToKeyframes = false;
-                    if (MenuSnapToKeyframe != null) MenuSnapToKeyframe.IsChecked = false;
-                    SetStatus("SmartCut: ON (スナップOFF)");
-                }
-                else SetStatus("SmartCut: OFF");
-            }
-        }
+		{
+			if (sender is ToggleMenuFlyoutItem item)
+			{
+				AppSettings.Current.UseSmartCut = item.IsChecked;
+				if (item.IsChecked)
+				{
+					AppSettings.Current.SnapToKeyframes = false;
+					if (MenuSnapToKeyframe != null) MenuSnapToKeyframe.IsChecked = false;
+					if (MenuHardwareAccel != null) MenuHardwareAccel.IsEnabled = _hwEncoderAvailable;
+					SetStatus("スマートカット: ON");
+				}
+				else
+				{
+					if (MenuHardwareAccel != null) MenuHardwareAccel.IsEnabled = false;
+					SetStatus("スマートカット: OFF");
+				}
+			}
+		}
 
         private void MenuSnapToKeyframe_Click(object sender, RoutedEventArgs e)
         {
@@ -698,9 +707,10 @@ namespace VideoCutCS
                 {
                     AppSettings.Current.UseSmartCut = false;
                     if (MenuSmartCut != null) MenuSmartCut.IsChecked = false;
-                    SetStatus("スナップ: ON (SmartCut OFF)");
+                    if (MenuHardwareAccel != null) MenuHardwareAccel.IsEnabled = false;
+                    SetStatus("キーフレーム吸着: ON");
                 }
-                else SetStatus("スナップ: OFF");
+                else SetStatus("キーフレーム吸着: OFF");
             }
         }
 
