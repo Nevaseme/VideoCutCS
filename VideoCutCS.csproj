@@ -67,6 +67,6 @@
 
 	<PropertyGroup>
 		<PublishTrimmed>False</PublishTrimmed>
-		<PublishReadyToRun>False</PublishReadyToRun>
+		<PublishReadyToRun>True</PublishReadyToRun>
 	</PropertyGroup>
 </Project>

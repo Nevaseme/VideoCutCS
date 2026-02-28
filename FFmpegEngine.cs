@@ -32,20 +32,20 @@ namespace VideoCutCS
 		public async Task<string> GetFFmpegVersionAsync()
 		{
 			if (!File.Exists(_ffmpegPath)) return "エラー: FFmpegが見つかりません。";
-			return await ExecuteFFmpegCommandAsync(_ffmpegPath, "-version");
+			return await ExecuteFFmpegCommandAsync(_ffmpegPath, "-version").ConfigureAwait(false);
 		}
 
 		public async Task<string> SaveSnapshotAsync(string inputPath, string outputPath, TimeSpan position)
 		{
 			string args = $"-ss {position} -i \"{inputPath}\" -frames:v 1 -c:v png -y \"{outputPath}\"";
-			return await ExecuteFFmpegCommandAsync(_ffmpegPath, args);
+			return await ExecuteFFmpegCommandAsync(_ffmpegPath, args).ConfigureAwait(false);
 		}
 
 		public async Task<string> CutVideoSimpleAsync(string inputPath, string outputPath, TimeSpan start, TimeSpan end)
 		{
 			var duration = end - start;
 			string args = $"-ss {start} -i \"{inputPath}\" -t {duration} -c copy -map 0 -avoid_negative_ts make_zero -y \"{outputPath}\"";
-			return await ExecuteFFmpegCommandAsync(_ffmpegPath, args);
+			return await ExecuteFFmpegCommandAsync(_ffmpegPath, args).ConfigureAwait(false);
 		}
 
 		/// <summary>
@@ -64,7 +64,7 @@ namespace VideoCutCS
 			if (segments.Count == 1)
 			{
 				progress?.Report((1, 1));
-				return await CutVideoSimpleAsync(inputPath, outputPath, segments[0].Start, segments[0].End);
+				return await CutVideoSimpleAsync(inputPath, outputPath, segments[0].Start, segments[0].End).ConfigureAwait(false);
 			}
 
 			string tempDir = Path.GetDirectoryName(outputPath) ?? "";
@@ -81,17 +81,17 @@ namespace VideoCutCS
 					cancellationToken.ThrowIfCancellationRequested();
 					string tempFile = Path.Combine(tempDir, $"temp_bseg{i}_{id}.mp4");
 					tempFiles.Add(tempFile);
-					await CutVideoSimpleAsync(inputPath, tempFile, segments[i].Start, segments[i].End);
+					await CutVideoSimpleAsync(inputPath, tempFile, segments[i].Start, segments[i].End).ConfigureAwait(false);
 					progress?.Report((i + 1, total));
 				}
 
 				cancellationToken.ThrowIfCancellationRequested();
 				string listContent = string.Join("\n", tempFiles.Select(f => $"file '{Path.GetFileName(f)}'"));
-				await File.WriteAllTextAsync(tempList, listContent, cancellationToken);
+				await File.WriteAllTextAsync(tempList, listContent, cancellationToken).ConfigureAwait(false);
 
 				string argsConcat = $"-f concat -safe 0 -i \"{tempList}\" -c copy -y \"{outputPath}\"";
 				progress?.Report((total, total));
-				await ExecuteFFmpegCommandAsync(_ffmpegPath, argsConcat, workingDirectory: tempDir);
+				await ExecuteFFmpegCommandAsync(_ffmpegPath, argsConcat, workingDirectory: tempDir).ConfigureAwait(false);
 
 				return $"バッチカット完了 ({segments.Count} セグメント)";
 			}
@@ -116,7 +116,7 @@ namespace VideoCutCS
 			if (!File.Exists(_ffprobePath)) return info;
 
 			string args = $"-v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate,codec_name,bit_rate -of default=noprint_wrappers=1:nokey=0 \"{inputPath}\"";
-			string output = await ExecuteFFmpegCommandAsync(_ffprobePath, args);
+			string output = await ExecuteFFmpegCommandAsync(_ffprobePath, args).ConfigureAwait(false);
 
 			ParseVideoInfo(output, info);
 			return info;
@@ -124,7 +124,7 @@ namespace VideoCutCS
 
 		public async Task<List<TimeSpan>> GetKeyframesAsync(string inputPath, CancellationToken cancellationToken = default)
 		{
-			var keyframes = new List<TimeSpan>();
+			var keyframes = new List<TimeSpan>(4096);
 			if (!File.Exists(_ffprobePath)) return keyframes;
 
 			string args = $"-v error -hide_banner -select_streams v:0 -show_entries packet=pts_time,flags -of csv=p=0 \"{inputPath}\"";
@@ -138,19 +138,15 @@ namespace VideoCutCS
 					var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
 
 					string? line;
-					while ((line = await process.StandardOutput.ReadLineAsync(cancellationToken)) != null)
+					while ((line = await process.StandardOutput.ReadLineAsync(cancellationToken).ConfigureAwait(false)) != null)
 					{
-						if (string.IsNullOrWhiteSpace(line)) continue;
-						var parts = line.Split(',');
-						if (parts.Length >= 2 && parts[1].Contains("K"))
+						if (line.Length == 0) continue;
+						if (TryParseKeyframeLine(line, out double sec))
 						{
-							if (double.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out double sec))
-							{
-								keyframes.Add(TimeSpan.FromSeconds(sec));
-							}
+							keyframes.Add(TimeSpan.FromSeconds(sec));
 						}
 					}
-					await Task.WhenAll(errorTask, process.WaitForExitAsync(cancellationToken));
+					await Task.WhenAll(errorTask, process.WaitForExitAsync(cancellationToken)).ConfigureAwait(false);
 				}
 				catch (OperationCanceledException)
 				{
@@ -158,7 +154,8 @@ namespace VideoCutCS
 					throw;
 				}
 			}
-			return keyframes.OrderBy(x => x).ToList();
+			keyframes.Sort();
+			return keyframes;
 		}
 
 		/// <summary>
@@ -170,7 +167,7 @@ namespace VideoCutCS
 			if (_hwEncoderDetected) return _cachedHwEncoder;
 			if (!File.Exists(_ffmpegPath)) { _hwEncoderDetected = true; return null; }
 
-			string output = await ExecuteCommandGetOutputAsync(_ffmpegPath, "-hide_banner -encoders");
+			string output = await ExecuteCommandGetOutputAsync(_ffmpegPath, "-hide_banner -encoders").ConfigureAwait(false);
 			string[] candidates = ["h264_nvenc", "h264_qsv", "h264_amf"];
 			_cachedHwEncoder = candidates.FirstOrDefault(e => output.Contains(e, StringComparison.OrdinalIgnoreCase));
 			_hwEncoderDetected = true;
@@ -189,9 +186,9 @@ namespace VideoCutCS
 			if (isSimpleCut)
 			{
 				Debug.WriteLine("[SmartCut] 再エンコード不要と判断し、通常カットを実行します。");
-				return await CutVideoSimpleAsync(inputPath, outputPath, start, end);
+				return await CutVideoSimpleAsync(inputPath, outputPath, start, end).ConfigureAwait(false);
 			}
-			return await ExecuteSmartCutInternalAsync(inputPath, outputPath, start, end, nextKeyframe);
+			return await ExecuteSmartCutInternalAsync(inputPath, outputPath, start, end, nextKeyframe).ConfigureAwait(false);
 		}
 
 		private async Task<string> ExecuteSmartCutInternalAsync(string inputPath, string outputPath, TimeSpan start, TimeSpan end, TimeSpan splitPoint)
@@ -205,7 +202,7 @@ namespace VideoCutCS
 
 			try
 			{
-				var info = await GetVideoInfoAsync(inputPath);
+				var info = await GetVideoInfoAsync(inputPath).ConfigureAwait(false);
 				string argsA = $"-ss {start} -to {splitPoint} -i \"{inputPath}\" " +
 							   BuildVideoEncoderArgs(info) +
 							   $"-c:a copy -y \"{tempPartA}\"";
@@ -214,13 +211,13 @@ namespace VideoCutCS
 
 				var taskA = ExecuteFFmpegCommandAsync(_ffmpegPath, argsA);
 				var taskB = ExecuteFFmpegCommandAsync(_ffmpegPath, argsB);
-				await Task.WhenAll(taskA, taskB);
+				await Task.WhenAll(taskA, taskB).ConfigureAwait(false);
 
 				string listContent = $"file '{Path.GetFileName(tempPartA)}'\nfile '{Path.GetFileName(tempPartB)}'";
-				await File.WriteAllTextAsync(tempList, listContent);
+				await File.WriteAllTextAsync(tempList, listContent).ConfigureAwait(false);
 
 				string argsConcat = $"-f concat -safe 0 -i \"{tempList}\" -c copy -y \"{outputPath}\"";
-				await ExecuteFFmpegCommandAsync(_ffmpegPath, argsConcat, workingDirectory: tempDir);
+				await ExecuteFFmpegCommandAsync(_ffmpegPath, argsConcat, workingDirectory: tempDir).ConfigureAwait(false);
 
 				return "スマートカット完了";
 			}
@@ -264,8 +261,8 @@ namespace VideoCutCS
 				p.Start();
 				var stdoutTask = p.StandardOutput.ReadToEndAsync();
 				var stderrTask = p.StandardError.ReadToEndAsync();
-				await Task.WhenAll(stdoutTask, stderrTask, p.WaitForExitAsync());
-				return await stderrTask;
+				await Task.WhenAll(stdoutTask, stderrTask, p.WaitForExitAsync()).ConfigureAwait(false);
+				return stderrTask.Result;
 			}
 		}
 
@@ -277,8 +274,18 @@ namespace VideoCutCS
 			p.Start();
 			var stdoutTask = p.StandardOutput.ReadToEndAsync();
 			var stderrTask = p.StandardError.ReadToEndAsync();
-			await Task.WhenAll(stdoutTask, stderrTask, p.WaitForExitAsync());
-			return await stdoutTask + await stderrTask;
+			await Task.WhenAll(stdoutTask, stderrTask, p.WaitForExitAsync()).ConfigureAwait(false);
+			return stdoutTask.Result + stderrTask.Result;
+		}
+
+		private static bool TryParseKeyframeLine(string line, out double seconds)
+		{
+			seconds = 0;
+			ReadOnlySpan<char> span = line.AsSpan();
+			int comma = span.IndexOf(',');
+			if (comma <= 0 || comma >= span.Length - 1) return false;
+			if (!span.Slice(comma + 1).Contains('K')) return false;
+			return double.TryParse(span.Slice(0, comma), NumberStyles.Any, CultureInfo.InvariantCulture, out seconds);
 		}
 
 		private ProcessStartInfo CreateStartInfo(string fileName, string args, string? workingDirectory = null)

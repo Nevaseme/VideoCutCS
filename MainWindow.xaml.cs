@@ -34,6 +34,7 @@ namespace VideoCutCS
         private readonly SolidColorBrush _brushError   = new(Microsoft.UI.Colors.Red);
         private readonly SolidColorBrush _brushWarning = new(Microsoft.UI.Colors.Orange);
         private readonly SolidColorBrush _brushSuccess = new(Microsoft.UI.Colors.Green);
+        private readonly SolidColorBrush _brushSegment = new(Microsoft.UI.Colors.Yellow);
 
         // タイムラインロジック
         private TimeSpan _startTime = TimeSpan.Zero;
@@ -447,39 +448,66 @@ namespace VideoCutCS
 
         private void UpdateSegmentRects()
         {
-            foreach (var r in _segmentRects)
-                TimelineArea.Children.Remove(r);
-            _segmentRects.Clear();
+            int needed = 0;
+            double totalWidth = 0;
+            double duration = 0;
 
-            if (Player.MediaPlayer?.PlaybackSession == null) return;
-            double totalWidth = TimelineArea.Width;
-            double duration = Player.MediaPlayer.PlaybackSession.NaturalDuration.TotalSeconds;
-            if (duration <= 0 || !(totalWidth > 0)) return;
-
-            var activeSeg = _hoveredSegment ?? SegmentListView.SelectedItem as VideoSegment;
-
-            foreach (var seg in _segments)
+            if (Player.MediaPlayer?.PlaybackSession != null)
             {
-                double startRatio = seg.Start.TotalSeconds / duration;
-                double widthRatio = (seg.End - seg.Start).TotalSeconds / duration;
-                if (widthRatio <= 0) continue;
+                totalWidth = TimelineArea.Width;
+                duration = Player.MediaPlayer.PlaybackSession.NaturalDuration.TotalSeconds;
+                if (duration > 0 && totalWidth > 0)
+                    needed = _segments.Count;
+            }
 
-                bool isActive = seg == activeSeg;
+            // プール縮小: 余分な Rectangle をビジュアルツリーから除去
+            while (_segmentRects.Count > needed)
+            {
+                var last = _segmentRects[^1];
+                TimelineArea.Children.Remove(last);
+                _segmentRects.RemoveAt(_segmentRects.Count - 1);
+            }
+
+            if (needed == 0) return;
+
+            // プール拡張: 不足分のみ新規作成
+            int insertBase = TimelineArea.Children.IndexOf(TimelineBackground) + 1;
+            while (_segmentRects.Count < needed)
+            {
                 var rect = new Rectangle
                 {
-                    Width = totalWidth * widthRatio,
                     Height = 6,
                     RadiusX = 3,
                     RadiusY = 3,
                     HorizontalAlignment = HorizontalAlignment.Left,
                     VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(totalWidth * startRatio, 0, 0, 0),
-                    Fill = new SolidColorBrush(Microsoft.UI.Colors.Yellow),
-                    Opacity = isActive ? 0.8 : 0.4,
+                    Fill = _brushSegment,
                     IsHitTestVisible = false
                 };
-                TimelineArea.Children.Insert(TimelineArea.Children.IndexOf(TimelineBackground) + 1, rect);
+                TimelineArea.Children.Insert(insertBase + _segmentRects.Count, rect);
                 _segmentRects.Add(rect);
+            }
+
+            // プロパティ更新のみ (オブジェクト再生成なし)
+            var activeSeg = _hoveredSegment ?? SegmentListView.SelectedItem as VideoSegment;
+            for (int i = 0; i < needed; i++)
+            {
+                var seg = _segments[i];
+                var rect = _segmentRects[i];
+                double startRatio = seg.Start.TotalSeconds / duration;
+                double widthRatio = (seg.End - seg.Start).TotalSeconds / duration;
+                bool isActive = seg == activeSeg;
+
+                if (widthRatio <= 0)
+                {
+                    rect.Visibility = Visibility.Collapsed;
+                    continue;
+                }
+
+                rect.Width = totalWidth * widthRatio;
+                rect.Margin = new Thickness(totalWidth * startRatio, 0, 0, 0);
+                rect.Opacity = isActive ? 0.8 : 0.4;
+                rect.Visibility = Visibility.Visible;
             }
         }
 
