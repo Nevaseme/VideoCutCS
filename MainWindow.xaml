@@ -32,29 +32,7 @@
                 <MenuFlyoutItem Text="終了(X)" Click="MenuExit_Click" Icon="Cancel"/>
             </MenuBarItem>
 
-            <MenuBarItem Title="カット方式(C)">
-                <ToggleMenuFlyoutItem x:Name="MenuSnapToKeyframe"
-                                      Text="キーフレーム吸着　高速・高精度（推奨）"
-                                      IsChecked="True"
-                                      Click="MenuSnapToKeyframe_Click"/>
-                <ToggleMenuFlyoutItem x:Name="MenuSmartCut"
-                                      Text="スマートカット　フレーム精度優先（低速・再エンコードあり）"
-                                      IsChecked="False"
-                                      Click="MenuSmartCut_Click" />
-                <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="※ どちらも OFF のとき → 通常の高速カット" IsEnabled="False"/>
-            </MenuBarItem>
-
-            <MenuBarItem Title="エンコード(E)">
-                <ToggleMenuFlyoutItem x:Name="MenuHardwareAccel"
-                                      Text="ハードウェアエンコード (検出中...)"
-                                      IsChecked="False"
-                                      IsEnabled="False"
-                                      Click="MenuHardwareAccel_Click"/>
-                <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="※ スマートカット ON のときのみ有効" IsEnabled="False"/>
-            </MenuBarItem>
-        </MenuBar>
+            </MenuBar>
 
         <MediaPlayerElement x:Name="Player"
                             Grid.Row="1"
@@ -147,8 +125,8 @@
 
         <ScrollViewer Grid.Row="2"
                       Grid.ColumnSpan="2"
-                      HorizontalScrollBarVisibility="Auto"
-                      HorizontalScrollMode="Enabled"
+                      HorizontalScrollBarVisibility="Disabled"
+                      HorizontalScrollMode="Disabled"
                       VerticalScrollBarVisibility="Disabled"
                       VerticalScrollMode="Disabled"
                       ZoomMode="Disabled">
@@ -156,7 +134,7 @@
                         Padding="20"
                         Spacing="10"
                         Background="#202020"
-                        MinWidth="1040">
+                        MinWidth="880">
 
             <Grid Margin="0,0,0,10">
                 <Grid.ColumnDefinitions>
@@ -184,6 +162,7 @@
                               Height="30"
                               VerticalAlignment="Top"
                               HorizontalAlignment="Left"
+                              Margin="10,0,10,0"
                               Background="Transparent"
                               PointerPressed="Timeline_PointerPressed"
                               PointerMoved="Timeline_PointerMoved"
@@ -250,52 +229,6 @@
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
 
-                    <!-- ズームスライダー -->
-                    <StackPanel Orientation="Vertical" VerticalAlignment="Center" Width="110">
-                        <TextBlock Text="ズーム" FontSize="10" Foreground="Gray" HorizontalAlignment="Center"/>
-                        <TextBox x:Name="ZoomBox"
-                                 Text="x 1.0"
-                                 FontSize="12"
-                                 Background="Transparent"
-                                 BorderThickness="0"
-                                 Foreground="Gray"
-                                 HorizontalAlignment="Center"
-                                 TextAlignment="Center"
-                                 GotFocus="Shared_TextBox_GotFocus"
-                                 LostFocus="ZoomBox_LostFocus"
-                                 KeyDown="ZoomBox_KeyDown"/>
-                        <Slider x:Name="ZoomSlider"
-                                Minimum="1.0" Maximum="100.0" Value="1.0"
-                                StepFrequency="0.1"
-                                ValueChanged="ZoomSlider_ValueChanged"
-                                PointerWheelChanged="ZoomSlider_PointerWheelChanged"
-                                Width="110"/>
-                    </StackPanel>
-
-                    <!-- 速度スライダー -->
-                    <StackPanel Orientation="Vertical" VerticalAlignment="Center" Width="110">
-                        <TextBlock Text="速度" FontSize="10" Foreground="Gray" HorizontalAlignment="Center"/>
-                        <TextBox x:Name="SpeedBox"
-                                 Text="x 1.0"
-                                 FontSize="12"
-                                 Background="Transparent"
-                                 BorderThickness="0"
-                                 Foreground="Gray"
-                                 HorizontalAlignment="Center"
-                                 TextAlignment="Center"
-                                 GotFocus="Shared_TextBox_GotFocus"
-                                 LostFocus="SpeedBox_LostFocus"
-                                 KeyDown="SpeedBox_KeyDown"/>
-                        <Slider x:Name="SpeedSlider"
-                                Minimum="0.1" Maximum="10.0" Value="1.0"
-                                StepFrequency="0.1"
-                                ValueChanged="SpeedSlider_ValueChanged"
-                                PointerWheelChanged="SpeedSlider_PointerWheelChanged"
-                                Width="110"/>
-                    </StackPanel>
-
-                    <Border Width="1" Height="52" Background="Gray" VerticalAlignment="Center" Margin="4,0"/>
-
                     <!-- 現在位置表示 -->
                     <StackPanel Orientation="Vertical" VerticalAlignment="Center" Spacing="2">
                         <TextBlock Text="現在位置" FontSize="10" Foreground="Gray" HorizontalAlignment="Center"/>
@@ -318,61 +251,142 @@
                                        VerticalAlignment="Center"/>
                         </StackPanel>
                     </StackPanel>
+
+                    <Border Width="1" Height="52" Background="Gray" VerticalAlignment="Center" Margin="4,0"/>
+
+                    <!-- カット設定 -->
+                    <StackPanel Orientation="Vertical" VerticalAlignment="Center" Spacing="2">
+                        <ToggleSwitch x:Name="MenuSmartCut"
+                                      IsOn="False"
+                                      OnContent="スマートカット" OffContent="スマートカット"
+                                      Toggled="MenuSmartCut_Toggled"
+                                      ToolTipService.ToolTip="OFF → キーフレーム吸着で高速カット（推奨）&#x0a;ON  → フレーム精度優先（低速・再エンコードあり）"/>
+                        <ToggleSwitch x:Name="MenuHardwareAccel"
+                                      IsOn="False"
+                                      IsEnabled="False"
+                                      OnContent="HWエンコード" OffContent="HWエンコード"
+                                      Toggled="MenuHardwareAccel_Toggled"
+                                      ToolTipService.ToolTip="スマートカット ON のときのみ有効"/>
+                    </StackPanel>
                 </StackPanel>
             </Grid>
 
-            <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
-                <TextBlock Text="開始:" FontSize="16" Foreground="LightGray" VerticalAlignment="Center"/>
-                <TextBox x:Name="TextStartTime" Text="00:00:00.000" Width="120" FontSize="16" Background="Transparent" BorderThickness="0,0,0,1" Foreground="White" 
-                         GotFocus="Shared_TextBox_GotFocus" 
-                         LostFocus="StartTime_LostFocus" 
-                         KeyDown="StartTime_KeyDown"/>
+            <!-- コントロール行1: ズーム・速度（左）／ 開始・終了時間（右） -->
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
 
-                <TextBlock Text="～" FontSize="16" Foreground="LightGray" VerticalAlignment="Center"/>
-
-                <TextBlock Text="終了:" FontSize="16" Foreground="LightGray" VerticalAlignment="Center"/>
-                <TextBox x:Name="TextEndTime" Text="(未設定)" Width="120" FontSize="16" Background="Transparent" BorderThickness="0,0,0,1" Foreground="White" 
-                         GotFocus="Shared_TextBox_GotFocus" 
-                         LostFocus="EndTime_LostFocus" 
-                         KeyDown="EndTime_KeyDown"/>
-
-                <TextBlock x:Name="TextDuration" Text="(長さ: 00:00:00.000)" FontSize="16" Foreground="Gray" VerticalAlignment="Center" Margin="10,0,0,0"/>
-            </StackPanel>
-
-            <StackPanel Orientation="Horizontal" Spacing="15" HorizontalAlignment="Center">
-                <Button x:Name="BtnPlayPause" Click="BtnPlayPause_Click" Width="60" Height="40" ToolTipService.ToolTip="再生/一時停止 (Space)">
-                    <SymbolIcon x:Name="IconPlayPause" Symbol="Play"/>
-                </Button>
-                <Button x:Name="BtnSnapshot" Click="BtnSnapshot_Click" Width="60" Height="40" ToolTipService.ToolTip="現在のフレームを保存 (S)">
-                    <SymbolIcon Symbol="Camera"/>
-                </Button>
-
-                <Border Width="20"/>
-
-                <StackPanel Orientation="Horizontal" Spacing="5">
-                    <Button x:Name="BtnPrevKeyframe" Click="BtnPrevKeyframe_Click" Width="40" Height="40" ToolTipService.ToolTip="前のキーフレームへ (Alt+Left)" IsEnabled="False">
-                        <PathIcon Data="M 0,0 L 2,0 L 2,12 L 0,12 Z M 4,6 L 12,0 L 12,12 Z"/>
-                    </Button>
-                    <Button x:Name="BtnNextKeyframe" Click="BtnNextKeyframe_Click" Width="40" Height="40" ToolTipService.ToolTip="次のキーフレームへ (Alt+Right)" IsEnabled="False">
-                        <PathIcon Data="M 0,0 L 8,6 L 0,12 Z M 10,0 L 12,0 L 12,12 L 10,12 Z"/>
-                    </Button>
+                <!-- 左: ズーム・速度スライダー -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <StackPanel Orientation="Vertical" VerticalAlignment="Center" Width="110">
+                        <TextBlock Text="ズーム" FontSize="10" Foreground="Gray" HorizontalAlignment="Center"/>
+                        <TextBox x:Name="ZoomBox"
+                                 Text="x 1.0" FontSize="12" Background="Transparent" BorderThickness="0"
+                                 Foreground="Gray" HorizontalAlignment="Center" TextAlignment="Center"
+                                 GotFocus="Shared_TextBox_GotFocus" LostFocus="ZoomBox_LostFocus" KeyDown="ZoomBox_KeyDown"/>
+                        <Slider x:Name="ZoomSlider"
+                                Minimum="1.0" Maximum="100.0" Value="1.0" StepFrequency="0.1"
+                                ValueChanged="ZoomSlider_ValueChanged" PointerWheelChanged="ZoomSlider_PointerWheelChanged" Width="110"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Vertical" VerticalAlignment="Center" Width="110">
+                        <TextBlock Text="速度" FontSize="10" Foreground="Gray" HorizontalAlignment="Center"/>
+                        <TextBox x:Name="SpeedBox"
+                                 Text="x 1.0" FontSize="12" Background="Transparent" BorderThickness="0"
+                                 Foreground="Gray" HorizontalAlignment="Center" TextAlignment="Center"
+                                 GotFocus="Shared_TextBox_GotFocus" LostFocus="SpeedBox_LostFocus" KeyDown="SpeedBox_KeyDown"/>
+                        <Slider x:Name="SpeedSlider"
+                                Minimum="0.1" Maximum="10.0" Value="1.0" StepFrequency="0.1"
+                                ValueChanged="SpeedSlider_ValueChanged" PointerWheelChanged="SpeedSlider_PointerWheelChanged" Width="110"/>
+                    </StackPanel>
                 </StackPanel>
 
-                <Border Width="10"/>
+                <!-- 右: 開始・終了時間 -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <TextBlock Text="開始:" FontSize="14" Foreground="LightGray" VerticalAlignment="Center"/>
+                    <TextBox x:Name="TextStartTime" Text="00:00:00.000" Width="120" FontSize="14"
+                             Background="Transparent" BorderThickness="0,0,0,1" Foreground="White"
+                             VerticalAlignment="Center"
+                             GotFocus="Shared_TextBox_GotFocus"
+                             LostFocus="StartTime_LostFocus"
+                             KeyDown="StartTime_KeyDown"/>
+                    <TextBlock Text="～" FontSize="14" Foreground="LightGray" VerticalAlignment="Center"/>
+                    <TextBlock Text="終了:" FontSize="14" Foreground="LightGray" VerticalAlignment="Center"/>
+                    <TextBox x:Name="TextEndTime" Text="(未設定)" Width="120" FontSize="14"
+                             Background="Transparent" BorderThickness="0,0,0,1" Foreground="White"
+                             VerticalAlignment="Center"
+                             GotFocus="Shared_TextBox_GotFocus"
+                             LostFocus="EndTime_LostFocus"
+                             KeyDown="EndTime_KeyDown"/>
+                    <TextBlock x:Name="TextDuration" Text="(長さ: 00:00:00.000)" FontSize="14" Foreground="Gray" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                </StackPanel>
+            </Grid>
 
-                <Button x:Name="BtnSetStart" Content="[ 開始位置 (I) ]" Click="BtnSetStart_Click" Width="120"/>
-                <Button x:Name="BtnSetEnd"   Content="[ 終了位置 (F) ]" Click="BtnSetEnd_Click"   Width="120"/>
+            <!-- コントロール行2: LosslessCut スタイル -->
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
 
-                <Border Width="20"/>
+                <!-- 行1: [ IN ] [ ◀KF ] [ ▶ Play ] [ KF▶ ] [ OUT ] (中央配置) -->
+                <StackPanel Grid.Row="0"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Center"
+                            Spacing="6">
+                    <Button x:Name="BtnSetStart"
+                            Content="[ 開始 (I)"
+                            Click="BtnSetStart_Click"
+                            Width="110" Height="44"
+                            ToolTipService.ToolTip="切り取り開始位置を設定 (I)"/>
+                    <Button x:Name="BtnPrevKeyframe"
+                            Click="BtnPrevKeyframe_Click"
+                            Width="44" Height="44"
+                            IsEnabled="False"
+                            ToolTipService.ToolTip="前のキーフレームへ (Alt+Left)">
+                        <PathIcon Data="M 0,0 L 2,0 L 2,12 L 0,12 Z M 4,6 L 12,0 L 12,12 Z"/>
+                    </Button>
+                    <Button x:Name="BtnPlayPause"
+                            Click="BtnPlayPause_Click"
+                            Width="60" Height="44"
+                            ToolTipService.ToolTip="再生/一時停止 (Space)">
+                        <SymbolIcon x:Name="IconPlayPause" Symbol="Play"/>
+                    </Button>
+                    <Button x:Name="BtnNextKeyframe"
+                            Click="BtnNextKeyframe_Click"
+                            Width="44" Height="44"
+                            IsEnabled="False"
+                            ToolTipService.ToolTip="次のキーフレームへ (Alt+Right)">
+                        <PathIcon Data="M 0,0 L 8,6 L 0,12 Z M 10,0 L 12,0 L 12,12 L 10,12 Z"/>
+                    </Button>
+                    <Button x:Name="BtnSetEnd"
+                            Content="終了 (F) ]"
+                            Click="BtnSetEnd_Click"
+                            Width="110" Height="44"
+                            ToolTipService.ToolTip="切り取り終了位置を設定 (F)"/>
+                </StackPanel>
 
-                <Button x:Name="BtnCut"
-                        Content="✂ カット実行"
-                        Click="BtnCut_Click"
-                        Style="{StaticResource AccentButtonStyle}"
-                        Width="120"/>
-            </StackPanel>
+                <!-- 行2: [ 📷 Snapshot ](左端)   [ ✂ カット実行 ](右端) -->
+                <Grid Grid.Row="1" Margin="0,8,0,0">
+                    <Button x:Name="BtnSnapshot"
+                            HorizontalAlignment="Left"
+                            Click="BtnSnapshot_Click"
+                            Width="60" Height="40"
+                            ToolTipService.ToolTip="現在のフレームを保存 (S)">
+                        <SymbolIcon Symbol="Camera"/>
+                    </Button>
+                    <Button x:Name="BtnCut"
+                            HorizontalAlignment="Right"
+                            Content="✂ カット実行"
+                            Click="BtnCut_Click"
+                            Style="{StaticResource AccentButtonStyle}"
+                            Width="130" Height="40"/>
+                </Grid>
+            </Grid>
 
-                <TextBlock x:Name="StatusText" Text="準備完了" HorizontalAlignment="Center" Foreground="Gray"/>
+            <TextBlock x:Name="StatusText" Text="準備完了" HorizontalAlignment="Left" Foreground="Gray"/>
             </StackPanel>
         </ScrollViewer>
     </Grid>

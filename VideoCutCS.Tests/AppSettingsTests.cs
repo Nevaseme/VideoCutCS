@@ -37,7 +37,6 @@ public class AppSettingsTests
     {
         var s = new AppSettings();
         Assert.True(s.LoadKeyframes);
-        Assert.True(s.SnapToKeyframes);
         Assert.False(s.UseSmartCut);
     }
 

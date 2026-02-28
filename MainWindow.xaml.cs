@@ -18,6 +18,7 @@ using System.Threading;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Runtime.InteropServices;
 
 namespace VideoCutCS
 {
@@ -77,10 +78,25 @@ namespace VideoCutCS
         // 無音防止: 再生再開後に速度を適用するタイマー (80ms)
         private DispatcherTimer _playResumeTimer = null!;
 
+        // Win32: ウィンドウの最小サイズ強制用
+        [DllImport("user32.dll")] private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr newLong);
+        [DllImport("user32.dll")] private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+        [DllImport("user32.dll")] private static extern IntPtr CallWindowProc(IntPtr prev, IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll")] private static extern uint   GetDpiForWindow(IntPtr hWnd);
+        private const int  GWLP_WNDPROC     = -4;
+        private const uint WM_GETMINMAXINFO = 0x0024;
+        [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+        private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+        private WndProcDelegate? _wndProc;
+        private IntPtr _oldWndProc;
+        [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
+        [StructLayout(LayoutKind.Sequential)] private struct MINMAXINFO { public POINT ptReserved, ptMaxSize, ptMaxPosition, ptMinTrackSize, ptMaxTrackSize; }
+
         public MainWindow()
         {
             this.InitializeComponent();
             this.Title = "VideoCutCS";
+            InitWindowSize();
 
             SegmentListView.ItemsSource = _segments;
             _segments.CollectionChanged += (_, _) => { UpdateSegmentUI(); UpdateSegmentRects(); };
@@ -122,6 +138,31 @@ namespace VideoCutCS
             };
         }
 
+        private void InitWindowSize()
+        {
+            IntPtr hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            double scale = GetDpiForWindow(hwnd) / 96.0;
+
+            // 起動時の初期サイズ (1280×760 論理px)
+            this.AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(1280 * scale), (int)(760 * scale)));
+
+            // 最小サイズを WM_GETMINMAXINFO で強制 (900×560 論理px)
+            int minW = (int)(900 * scale), minH = (int)(560 * scale);
+            _wndProc = (hWnd, msg, wParam, lParam) =>
+            {
+                if (msg == WM_GETMINMAXINFO)
+                {
+                    var mmi = Marshal.PtrToStructure<MINMAXINFO>(lParam);
+                    mmi.ptMinTrackSize.X = minW;
+                    mmi.ptMinTrackSize.Y = minH;
+                    Marshal.StructureToPtr(mmi, lParam, false);
+                    return IntPtr.Zero;
+                }
+                return CallWindowProc(_oldWndProc, hWnd, msg, wParam, lParam);
+            };
+            _oldWndProc = SetWindowLongPtr(hwnd, GWLP_WNDPROC, Marshal.GetFunctionPointerForDelegate(_wndProc));
+        }
+
         private void InitializeSettings()
         {
             if (ZoomSlider != null)
@@ -130,15 +171,8 @@ namespace VideoCutCS
                 ZoomSlider.Maximum = AppSettings.Current.ZoomMax;
             }
 
-			// 設定の整合性チェック (吸着ONならSmartCutはOFF)
-			if (AppSettings.Current.UseSmartCut && AppSettings.Current.SnapToKeyframes)
-            {
-                AppSettings.Current.UseSmartCut = false;
-            }
-
-            if (MenuSmartCut != null) MenuSmartCut.IsChecked = AppSettings.Current.UseSmartCut;
-            if (MenuSnapToKeyframe != null) MenuSnapToKeyframe.IsChecked = AppSettings.Current.SnapToKeyframes;
-            if (MenuHardwareAccel != null) MenuHardwareAccel.IsChecked = AppSettings.Current.UseHardwareAccel;
+			if (MenuSmartCut != null) MenuSmartCut.IsOn = AppSettings.Current.UseSmartCut;
+			if (MenuHardwareAccel != null) MenuHardwareAccel.IsOn = AppSettings.Current.UseHardwareAccel;
         }
 
         private async void CheckEnvironment()
@@ -158,17 +192,17 @@ namespace VideoCutCS
                 if (hwEncoder != null)
                 {
                     _hwEncoderAvailable = true;
-                    MenuHardwareAccel.Text = $"ハードウェアエンコード ({hwEncoder})";
+                    ToolTipService.SetToolTip(MenuHardwareAccel, $"スマートカット ON のときのみ有効（{hwEncoder}）");
                     MenuHardwareAccel.IsEnabled = AppSettings.Current.UseSmartCut;
                 }
                 else
                 {
-                    MenuHardwareAccel.Text = "ハードウェアエンコード (非対応)";
+                    ToolTipService.SetToolTip(MenuHardwareAccel, "このデバイスはハードウェアエンコードに非対応");
                     MenuHardwareAccel.IsEnabled = false;
                     if (AppSettings.Current.UseHardwareAccel)
                     {
                         AppSettings.Current.UseHardwareAccel = false;
-                        MenuHardwareAccel.IsChecked = false;
+                        MenuHardwareAccel.IsOn = false;
                     }
                 }
             }
@@ -202,21 +236,21 @@ namespace VideoCutCS
 			SpeedBox.Text = "x 1.0";
 			_skipSpeedHandler = false;
 
-            Player.Source = MediaSource.CreateFromStorageFile(file);
-            GuidePanel.Visibility = Visibility.Collapsed;
-            this.Title = $"VideoCutCS - {file.Name}";
-
-            UpdateLabels();
-            SetStatus("読み込み中...");
-
-			// イベントハンドラの多重登録防止
+			// イベントハンドラの多重登録防止 (Source設定より前に登録してMediaOpenedを取りこぼさない)
 			if (Player.MediaPlayer != null)
-            {
-                Player.MediaPlayer.MediaOpened -= OnMediaOpened;
-                Player.MediaPlayer.PlaybackSession.PlaybackStateChanged -= OnPlaybackStateChanged;
-                Player.MediaPlayer.MediaOpened += OnMediaOpened;
-                Player.MediaPlayer.PlaybackSession.PlaybackStateChanged += OnPlaybackStateChanged;
-            }
+			{
+				Player.MediaPlayer.MediaOpened -= OnMediaOpened;
+				Player.MediaPlayer.PlaybackSession.PlaybackStateChanged -= OnPlaybackStateChanged;
+				Player.MediaPlayer.MediaOpened += OnMediaOpened;
+				Player.MediaPlayer.PlaybackSession.PlaybackStateChanged += OnPlaybackStateChanged;
+			}
+
+			Player.Source = MediaSource.CreateFromStorageFile(file);
+			GuidePanel.Visibility = Visibility.Collapsed;
+			this.Title = $"VideoCutCS - {file.Name}";
+
+			UpdateLabels();
+			SetStatus("読み込み中...");
 
             if (AppSettings.Current.LoadKeyframes)
             {
@@ -372,17 +406,25 @@ namespace VideoCutCS
         {
             if (TimelineScrollViewer == null || TimelineArea == null) return;
             double zoom = ZoomSlider.Value;
-            double newWidth = TimelineScrollViewer.ActualWidth * zoom;
+            double baseWidth = TimelineScrollViewer.ViewportWidth > 0
+                ? TimelineScrollViewer.ViewportWidth
+                : TimelineScrollViewer.ActualWidth;
+
+            // レイアウト未完了（baseWidth = 0）や幅が不十分な場合はスキップ
+            if (baseWidth <= 20) return;  // ← この1行を追加
+
+            double newWidth = (baseWidth - 20) * zoom;
             TimelineArea.Width = newWidth;
             UpdateSelectionRect();
             UpdateSegmentRects();
-            if (Player.MediaPlayer?.PlaybackSession != null) UpdatePlayhead(Player.MediaPlayer.PlaybackSession.Position);
+            if (Player.MediaPlayer?.PlaybackSession != null)
+                UpdatePlayhead(Player.MediaPlayer.PlaybackSession.Position);
         }
 
         private void UpdateSelectionRect()
         {
             double totalWidth = TimelineArea.Width;
-            if (Player.MediaPlayer?.PlaybackSession == null || totalWidth == 0) { SelectionRect.Visibility = Visibility.Collapsed; return; }
+            if (Player.MediaPlayer?.PlaybackSession == null || !(totalWidth > 0)) { SelectionRect.Visibility = Visibility.Collapsed; return; }
 
             var duration = Player.MediaPlayer.PlaybackSession.NaturalDuration.TotalSeconds;
             if (duration <= 0) { SelectionRect.Visibility = Visibility.Collapsed; return; }
@@ -412,7 +454,7 @@ namespace VideoCutCS
             if (Player.MediaPlayer?.PlaybackSession == null) return;
             double totalWidth = TimelineArea.Width;
             double duration = Player.MediaPlayer.PlaybackSession.NaturalDuration.TotalSeconds;
-            if (duration <= 0 || totalWidth <= 0) return;
+            if (duration <= 0 || !(totalWidth > 0)) return;
 
             var activeSeg = _hoveredSegment ?? SegmentListView.SelectedItem as VideoSegment;
 
@@ -509,7 +551,7 @@ namespace VideoCutCS
 			// ツールチップ
 			HoverTooltipText.Text = time.ToString(@"hh\:mm\:ss\.fff");
             var screenPoint = TimelineArea.TransformToVisual(TimelineContainer).TransformPoint(point.Position);
-            HoverTooltipTransform.X = Math.Clamp(screenPoint.X - (HoverTooltip.ActualWidth / 2), 0, TimelineContainer.ActualWidth - HoverTooltip.ActualWidth);
+            HoverTooltipTransform.X = Math.Clamp(screenPoint.X - (HoverTooltip.ActualWidth / 2), 0, Math.Max(0, TimelineContainer.ActualWidth - HoverTooltip.ActualWidth));
             HoverTooltip.Visibility = Visibility.Visible;
 
             if (_isDraggingTimeline)
@@ -587,7 +629,7 @@ namespace VideoCutCS
 
 		private TimeSpan GetSnapTime(TimeSpan target)
 		{
-			if (!AppSettings.Current.SnapToKeyframes || _keyframes.Count == 0) return target;
+			if (_keyframes.Count == 0) return target;
 			return TimeHelper.GetNearestKeyframe(target, _keyframes);
 		}
 
@@ -678,15 +720,13 @@ namespace VideoCutCS
         }
 
 		// トグル系ロジック
-		private void MenuSmartCut_Click(object sender, RoutedEventArgs e)
+		private void MenuSmartCut_Toggled(object sender, RoutedEventArgs e)
 		{
-			if (sender is ToggleMenuFlyoutItem item)
+			if (sender is ToggleSwitch ts)
 			{
-				AppSettings.Current.UseSmartCut = item.IsChecked;
-				if (item.IsChecked)
+				AppSettings.Current.UseSmartCut = ts.IsOn;
+				if (ts.IsOn)
 				{
-					AppSettings.Current.SnapToKeyframes = false;
-					if (MenuSnapToKeyframe != null) MenuSnapToKeyframe.IsChecked = false;
 					if (MenuHardwareAccel != null) MenuHardwareAccel.IsEnabled = _hwEncoderAvailable;
 					SetStatus("スマートカット: ON");
 				}
@@ -698,28 +738,11 @@ namespace VideoCutCS
 			}
 		}
 
-        private void MenuSnapToKeyframe_Click(object sender, RoutedEventArgs e)
-        {
-            if (sender is ToggleMenuFlyoutItem item)
+        private void MenuHardwareAccel_Toggled(object sender, RoutedEventArgs e)        {
+            if (sender is ToggleSwitch ts)
             {
-                AppSettings.Current.SnapToKeyframes = item.IsChecked;
-                if (item.IsChecked)
-                {
-                    AppSettings.Current.UseSmartCut = false;
-                    if (MenuSmartCut != null) MenuSmartCut.IsChecked = false;
-                    if (MenuHardwareAccel != null) MenuHardwareAccel.IsEnabled = false;
-                    SetStatus("キーフレーム吸着: ON");
-                }
-                else SetStatus("キーフレーム吸着: OFF");
-            }
-        }
-
-        private void MenuHardwareAccel_Click(object sender, RoutedEventArgs e)
-        {
-            if (sender is ToggleMenuFlyoutItem item)
-            {
-                AppSettings.Current.UseHardwareAccel = item.IsChecked;
-                SetStatus(item.IsChecked ? "ハードウェアエンコード: ON" : "ハードウェアエンコード: OFF");
+                AppSettings.Current.UseHardwareAccel = ts.IsOn;
+                SetStatus(ts.IsOn ? "ハードウェアエンコード: ON" : "ハードウェアエンコード: OFF");
             }
         }
 
@@ -820,8 +843,14 @@ namespace VideoCutCS
             if (_startTime >= end) { SetStatus("エラー: 開始が終了より後です。", true); return; }
 
             _segments.Add(new VideoSegment { Start = _startTime, End = end, Index = _segments.Count + 1 });
-            SetStatus($"セグメント追加: {_segments.Count} 件");
-            StatusText.Foreground = _brushSuccess;
+                    SetStatus($"セグメント追加: {_segments.Count} 件");
+                    StatusText.Foreground = _brushSuccess;
+                    // ContainerContentChanging はレイアウトパス（非同期）で発火するため、
+                    // 同期的な Focus() 呼び出しは ListView に上書きされる。
+                    // Low 優先度でディスパッチすることでレイアウトパス完了後にフォーカスを移動する。
+                    this.DispatcherQueue.TryEnqueue(
+                        Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                        () => MainRoot.Focus(FocusState.Programmatic));
         }
 
         private void BtnRemoveSegment_Click(object sender, RoutedEventArgs e)
@@ -940,18 +969,35 @@ namespace VideoCutCS
 		// テキストボックス関連
 		private void Shared_TextBox_GotFocus(object sender, RoutedEventArgs e)
 		{
-			if (object.ReferenceEquals(sender, TimeBox)) _isEditingTime = true;
-			else if (object.ReferenceEquals(sender, TextStartTime)) _isEditingStart = true;
-			else if (object.ReferenceEquals(sender, TextEndTime)) _isEditingEnd = true;
-			else if (object.ReferenceEquals(sender, ZoomBox)) _isEditingZoom = true;
-			else if (object.ReferenceEquals(sender, SpeedBox)) _isEditingSpeed = true;
+			if (sender is not TextBox tb) return;
+			// プログラム的フォーカス移動はユーザー操作ではないため編集扱いにしない
+			// (Timer による TimeBox 更新継続、SelectAll による意図しない選択表示を防ぐ)
+			if (tb.FocusState == FocusState.Programmatic) return;
 
-			if (sender is TextBox tb) tb.SelectAll();
+			if (object.ReferenceEquals(tb, TimeBox)) _isEditingTime = true;
+			else if (object.ReferenceEquals(tb, TextStartTime)) _isEditingStart = true;
+			else if (object.ReferenceEquals(tb, TextEndTime)) _isEditingEnd = true;
+			else if (object.ReferenceEquals(tb, ZoomBox)) _isEditingZoom = true;
+			else if (object.ReferenceEquals(tb, SpeedBox)) _isEditingSpeed = true;
+
+			tb.SelectAll();
 		}
 
         private void TimeBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            if (!_isUpdatingTimeByCode && TimeBox.FocusState != FocusState.Unfocused) _isEditingTime = true;
+            if (_isUpdatingTimeByCode)
+            {
+                // コードによる更新時はWinUI 3の自動全選択を防ぐ
+                // フォーカスがない状態で SelectionStart を操作するとフォーカスが奪われるため、
+                // フォーカスを持っている場合のみ操作する
+                if (TimeBox.FocusState != FocusState.Unfocused)
+                {
+                    TimeBox.SelectionStart = TimeBox.Text.Length;
+                    TimeBox.SelectionLength = 0;
+                }
+                return;
+            }
+            if (TimeBox.FocusState != FocusState.Unfocused) _isEditingTime = true;
         }
 
         private void HandleTimeInput(TextBox tb, Action<TimeSpan> onSuccess)
@@ -959,7 +1005,7 @@ namespace VideoCutCS
             if (TimeHelper.TryParseUserTime(tb.Text, out TimeSpan t)) { onSuccess(t); MainRoot.Focus(FocusState.Programmatic); UpdateLabels(); }
             else SetStatus("無効な時間形式です", true);
         }
-        private void TimeBox_KeyDown(object sender, KeyRoutedEventArgs e) { if (e.Key == VirtualKey.Enter) HandleTimeInput(TimeBox, t => { if (Player.MediaPlayer.PlaybackSession.CanSeek) Player.MediaPlayer.PlaybackSession.Position = t; _isEditingTime = false; }); }
+        private void TimeBox_KeyDown(object sender, KeyRoutedEventArgs e) { if (e.Key == VirtualKey.Enter) HandleTimeInput(TimeBox, t => { if (Player.MediaPlayer?.PlaybackSession?.CanSeek == true) Player.MediaPlayer.PlaybackSession.Position = t; _isEditingTime = false; }); }
         private void StartTime_KeyDown(object sender, KeyRoutedEventArgs e) { if (e.Key == VirtualKey.Enter) HandleTimeInput(TextStartTime, t => { _startTime = t; if (_isEndSet && _startTime >= _endTime) _isEndSet = false; _isEditingStart = false; }); }
         private void EndTime_KeyDown(object sender, KeyRoutedEventArgs e) { if (e.Key == VirtualKey.Enter) HandleTimeInput(TextEndTime, t => { if (t <= _startTime) { SetStatus("エラー: 終了時間は開始時間より後に設定してください。", true); return; } _endTime = t; _isEndSet = true; _isEditingEnd = false; }); }
 
@@ -1039,7 +1085,7 @@ namespace VideoCutCS
 			var delta = e.GetCurrentPoint(null).Properties.MouseWheelDelta;
 			bool increase = AppSettings.Current.InvertMouseWheelSeek ? delta < 0 : delta > 0;
 			SpeedSlider.Value = Math.Clamp(SpeedSlider.Value + SpeedSlider.StepFrequency * (increase ? 1 : -1), SpeedSlider.Minimum, SpeedSlider.Maximum);
-			e.Handled = true;
+		 e.Handled = true;
 		}
 
 		private void ApplySpeedFromText()

@@ -25,8 +25,7 @@ namespace VideoCutCS
         // --- カット・解析機能 ---
         public bool LoadKeyframes { get; set; } = true;
 
-        // デフォルト: 吸着ON (高速・安全), スマートカットOFF
-        public bool SnapToKeyframes { get; set; } = true;
+        // スマートカットOFF時はキーフレーム吸着で高速カット（デフォルト）
         public bool UseSmartCut { get; set; } = false;
 
         // --- ハードウェアアクセラレーション ---
