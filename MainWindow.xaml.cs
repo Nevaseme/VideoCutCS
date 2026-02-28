@@ -531,6 +531,7 @@ namespace VideoCutCS
 		private void Timeline_PointerPressed(object sender, PointerRoutedEventArgs e)
 		{
 			if (Player.MediaPlayer?.PlaybackSession == null) return;
+			MainRoot.Focus(FocusState.Programmatic);
 			var point = e.GetCurrentPoint(TimelineArea);
 			if (point.Properties.IsLeftButtonPressed)
 			{
@@ -600,6 +601,10 @@ namespace VideoCutCS
             // 子要素 (ListView の ScrollViewer や SegmentPanel_PointerWheelChanged) が
             // 処理済みのイベントに対してシーク/ズームが二重実行されないようガードする
             if (e.Handled) return;
+
+            // BtnAddSegment 後など ListView にフォーカスが残っている状態でホイール
+            // シークすると TimeBox に意図しないフォーカスが移る問題を防ぐ
+            MainRoot.Focus(FocusState.Programmatic);
 
             var shift = (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift) & CoreVirtualKeyStates.Down) == CoreVirtualKeyStates.Down;
             var delta = e.GetCurrentPoint(null).Properties.MouseWheelDelta;
@@ -972,7 +977,13 @@ namespace VideoCutCS
 			if (sender is not TextBox tb) return;
 			// プログラム的フォーカス移動はユーザー操作ではないため編集扱いにしない
 			// (Timer による TimeBox 更新継続、SelectAll による意図しない選択表示を防ぐ)
-			if (tb.FocusState == FocusState.Programmatic) return;
+			if (tb.FocusState == FocusState.Programmatic)
+			{
+				// WinUI 3 はフォーカス取得時にテキストを自動全選択するため、明示的に解除する
+				tb.SelectionStart = tb.Text.Length;
+				tb.SelectionLength = 0;
+				return;
+			}
 
 			if (object.ReferenceEquals(tb, TimeBox)) _isEditingTime = true;
 			else if (object.ReferenceEquals(tb, TextStartTime)) _isEditingStart = true;

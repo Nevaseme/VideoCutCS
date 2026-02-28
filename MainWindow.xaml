@@ -12,7 +12,9 @@
           Drop="MainRoot_Drop"
           Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
           PointerWheelChanged="MainRoot_PointerWheelChanged"
-          PreviewKeyDown="MainRoot_PreviewKeyDown">
+          PreviewKeyDown="MainRoot_PreviewKeyDown"
+          IsTabStop="True"
+          UseSystemFocusVisuals="False">
 
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -239,6 +241,7 @@
                                      FontSize="14"
                                      TextAlignment="Center"
                                      VerticalAlignment="Center"
+                                     IsTabStop="False"
                                      KeyDown="TimeBox_KeyDown"
                                      TextChanged="TimeBox_TextChanged"
                                      GotFocus="Shared_TextBox_GotFocus"
@@ -286,6 +289,7 @@
                         <TextBox x:Name="ZoomBox"
                                  Text="x 1.0" FontSize="12" Background="Transparent" BorderThickness="0"
                                  Foreground="Gray" HorizontalAlignment="Center" TextAlignment="Center"
+                                 IsTabStop="False"
                                  GotFocus="Shared_TextBox_GotFocus" LostFocus="ZoomBox_LostFocus" KeyDown="ZoomBox_KeyDown"/>
                         <Slider x:Name="ZoomSlider"
                                 Minimum="1.0" Maximum="100.0" Value="1.0" StepFrequency="0.1"
@@ -296,6 +300,7 @@
                         <TextBox x:Name="SpeedBox"
                                  Text="x 1.0" FontSize="12" Background="Transparent" BorderThickness="0"
                                  Foreground="Gray" HorizontalAlignment="Center" TextAlignment="Center"
+                                 IsTabStop="False"
                                  GotFocus="Shared_TextBox_GotFocus" LostFocus="SpeedBox_LostFocus" KeyDown="SpeedBox_KeyDown"/>
                         <Slider x:Name="SpeedSlider"
                                 Minimum="0.1" Maximum="10.0" Value="1.0" StepFrequency="0.1"
@@ -309,6 +314,7 @@
                     <TextBox x:Name="TextStartTime" Text="00:00:00.000" Width="120" FontSize="14"
                              Background="Transparent" BorderThickness="0,0,0,1" Foreground="White"
                              VerticalAlignment="Center"
+                             IsTabStop="False"
                              GotFocus="Shared_TextBox_GotFocus"
                              LostFocus="StartTime_LostFocus"
                              KeyDown="StartTime_KeyDown"/>
@@ -317,6 +323,7 @@
                     <TextBox x:Name="TextEndTime" Text="(未設定)" Width="120" FontSize="14"
                              Background="Transparent" BorderThickness="0,0,0,1" Foreground="White"
                              VerticalAlignment="Center"
+                             IsTabStop="False"
                              GotFocus="Shared_TextBox_GotFocus"
                              LostFocus="EndTime_LostFocus"
                              KeyDown="EndTime_KeyDown"/>
