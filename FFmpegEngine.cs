@@ -176,48 +176,113 @@ namespace VideoCutCS
 
 		public async Task<string> SmartCutVideoAsync(string inputPath, string outputPath, TimeSpan start, TimeSpan end, List<TimeSpan> keyframes)
 		{
-			// BinarySearchでO(log n)の次キーフレーム検索
-			int idx = keyframes.BinarySearch(start);
-			if (idx >= 0) idx++;  // 完全一致 → 次のインデックスへ
-			else idx = ~idx;      // 見つからない → 挿入点 = startより大きい最初の要素
-			var nextKeyframe = idx < keyframes.Count ? keyframes[idx] : TimeSpan.Zero;
-			bool isSimpleCut = (nextKeyframe == TimeSpan.Zero) || (nextKeyframe >= end) || ((nextKeyframe - start).TotalSeconds < 0.2);
+			// --- 開始点: start の直後のキーフレームを検索 ---
+			int sIdx = keyframes.BinarySearch(start);
+			if (sIdx >= 0) sIdx++;
+			else sIdx = ~sIdx;
+			var startSplit = sIdx < keyframes.Count ? keyframes[sIdx] : TimeSpan.Zero;
+			bool reencStart = startSplit != TimeSpan.Zero && startSplit < end && (startSplit - start).TotalSeconds >= 0.2;
 
-			if (isSimpleCut)
+			// --- 終了点: end の直前のキーフレームを検索 ---
+			int eIdx = keyframes.BinarySearch(end);
+			TimeSpan endSplit;
+			if (eIdx >= 0)
+				endSplit = TimeSpan.Zero; // end がキーフレーム上 → ストリームコピーで精密カット可能
+			else
+			{
+				int prev = ~eIdx - 1;
+				endSplit = prev >= 0 ? keyframes[prev] : TimeSpan.Zero;
+			}
+			bool reencEnd = endSplit != TimeSpan.Zero && endSplit > start && (end - endSplit).TotalSeconds >= 0.2;
+
+			// 両端とも再エンコード不要 → 高速カット
+			if (!reencStart && !reencEnd)
 			{
 				Debug.WriteLine("[SmartCut] 再エンコード不要と判断し、通常カットを実行します。");
 				return await CutVideoSimpleAsync(inputPath, outputPath, start, end).ConfigureAwait(false);
 			}
-			return await ExecuteSmartCutInternalAsync(inputPath, outputPath, start, end, nextKeyframe).ConfigureAwait(false);
+
+			// 中間ストリームコピー区間がない（両端の再エンコード区間が重複） → 全区間再エンコード
+			if (reencStart && reencEnd && startSplit >= endSplit)
+			{
+				Debug.WriteLine("[SmartCut] 中間区間なし。全区間を再エンコードします。");
+				return await ReencodeRangeAsync(inputPath, outputPath, start, end).ConfigureAwait(false);
+			}
+
+			return await ExecuteSmartCutInternalAsync(inputPath, outputPath, start, end,
+				reencStart ? startSplit : null, reencEnd ? endSplit : null).ConfigureAwait(false);
 		}
 
-		private async Task<string> ExecuteSmartCutInternalAsync(string inputPath, string outputPath, TimeSpan start, TimeSpan end, TimeSpan splitPoint)
+		/// <summary>全区間を再エンコードする（中間ストリームコピー区間が存在しない場合）。</summary>
+		private async Task<string> ReencodeRangeAsync(string inputPath, string outputPath, TimeSpan start, TimeSpan end)
 		{
-			Debug.WriteLine($"[SmartCut] 処理開始: Start={start} -> Split={splitPoint} -> End={end}");
+			var info = await GetVideoInfoAsync(inputPath).ConfigureAwait(false);
+			string args = $"-ss {start} -to {end} -i \"{inputPath}\" {BuildVideoEncoderArgs(info)}-c:a copy -y \"{outputPath}\"";
+			await ExecuteFFmpegCommandAsync(_ffmpegPath, args).ConfigureAwait(false);
+			return "スマートカット完了（全区間再エンコード）";
+		}
+
+		/// <summary>
+		/// 最大3パートに分割してスマートカットを実行する。
+		/// startSplit != null → 開始側を再エンコード (start → startSplit)
+		/// endSplit   != null → 終了側を再エンコード (endSplit → end)
+		/// 中間はストリームコピー。
+		/// </summary>
+		private async Task<string> ExecuteSmartCutInternalAsync(
+			string inputPath, string outputPath,
+			TimeSpan start, TimeSpan end,
+			TimeSpan? startSplit, TimeSpan? endSplit)
+		{
+			Debug.WriteLine($"[SmartCut] 処理開始: Start={start} | StartSplit={startSplit} | EndSplit={endSplit} | End={end}");
 			string tempDir = Path.GetDirectoryName(outputPath) ?? "";
 			string id = Guid.NewGuid().ToString("N")[..8];
-			string tempPartA = Path.Combine(tempDir, $"temp_A_{id}.mp4");
-			string tempPartB = Path.Combine(tempDir, $"temp_B_{id}.mp4");
+			var tempFiles = new List<string>();
 			string tempList = Path.Combine(tempDir, $"temp_list_{id}.txt");
 
 			try
 			{
 				var info = await GetVideoInfoAsync(inputPath).ConfigureAwait(false);
-				string argsA = $"-ss {start} -to {splitPoint} -i \"{inputPath}\" " +
-							   BuildVideoEncoderArgs(info) +
-							   $"-c:a copy -y \"{tempPartA}\"";
-				string argsB = $"-ss {splitPoint} -to {end} -i \"{inputPath}\" " +
-							   $"-c copy -video_track_timescale 90000 -y \"{tempPartB}\"";
+				string enc = BuildVideoEncoderArgs(info);
+				var tasks = new List<Task>();
+				int partIdx = 0;
 
-				var taskA = ExecuteFFmpegCommandAsync(_ffmpegPath, argsA);
-				var taskB = ExecuteFFmpegCommandAsync(_ffmpegPath, argsB);
-				await Task.WhenAll(taskA, taskB).ConfigureAwait(false);
+				// --- 開始側: 再エンコード ---
+				TimeSpan midStart = startSplit ?? start;
+				if (startSplit.HasValue)
+				{
+					string f = Path.Combine(tempDir, $"temp_{partIdx++}_{id}.mp4");
+					tempFiles.Add(f);
+					tasks.Add(ExecuteFFmpegCommandAsync(_ffmpegPath,
+						$"-ss {start} -to {startSplit.Value} -i \"{inputPath}\" {enc}-c:a copy -y \"{f}\""));
+				}
 
-				string listContent = $"file '{Path.GetFileName(tempPartA)}'\nfile '{Path.GetFileName(tempPartB)}'";
+				// --- 中間: ストリームコピー ---
+				TimeSpan midEnd = endSplit ?? end;
+				{
+					string f = Path.Combine(tempDir, $"temp_{partIdx++}_{id}.mp4");
+					tempFiles.Add(f);
+					tasks.Add(ExecuteFFmpegCommandAsync(_ffmpegPath,
+						$"-ss {midStart} -to {midEnd} -i \"{inputPath}\" -c copy -video_track_timescale 90000 -y \"{f}\""));
+				}
+
+				// --- 終了側: 再エンコード ---
+				if (endSplit.HasValue)
+				{
+					string f = Path.Combine(tempDir, $"temp_{partIdx++}_{id}.mp4");
+					tempFiles.Add(f);
+					tasks.Add(ExecuteFFmpegCommandAsync(_ffmpegPath,
+						$"-ss {endSplit.Value} -to {end} -i \"{inputPath}\" {enc}-c:a copy -y \"{f}\""));
+				}
+
+				await Task.WhenAll(tasks).ConfigureAwait(false);
+
+				// --- 結合 ---
+				string listContent = string.Join("\n", tempFiles.Select(f => $"file '{Path.GetFileName(f)}'"));
 				await File.WriteAllTextAsync(tempList, listContent).ConfigureAwait(false);
 
-				string argsConcat = $"-f concat -safe 0 -i \"{tempList}\" -c copy -y \"{outputPath}\"";
-				await ExecuteFFmpegCommandAsync(_ffmpegPath, argsConcat, workingDirectory: tempDir).ConfigureAwait(false);
+				await ExecuteFFmpegCommandAsync(_ffmpegPath,
+					$"-f concat -safe 0 -i \"{tempList}\" -c copy -y \"{outputPath}\"",
+					workingDirectory: tempDir).ConfigureAwait(false);
 
 				return "スマートカット完了";
 			}
@@ -227,8 +292,7 @@ namespace VideoCutCS
 			}
 			finally
 			{
-				DeleteFile(tempPartA);
-				DeleteFile(tempPartB);
+				foreach (var f in tempFiles) DeleteFile(f);
 				DeleteFile(tempList);
 			}
 		}
