@@ -853,20 +853,31 @@ namespace VideoCutCS
         private void UpdateSegmentUI()
         {
             bool hasSegments = _segments.Count > 0;
+            int idx = SegmentListView.SelectedIndex;
             SegmentExpander.Text = $"セグメントリスト ({_segments.Count} 件)";
-            BtnRemoveSegment.IsEnabled = hasSegments && SegmentListView.SelectedItem != null;
+            BtnRemoveSegment.IsEnabled = hasSegments && idx >= 0;
+            BtnMoveSegmentUp.IsEnabled = idx > 0;
+            BtnMoveSegmentDown.IsEnabled = idx >= 0 && idx < _segments.Count - 1;
             BtnBatchCut.IsEnabled = hasSegments && !string.IsNullOrEmpty(_currentFilePath);
         }
 
         private void SegmentListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            BtnRemoveSegment.IsEnabled = SegmentListView.SelectedItem != null;
+            int idx = SegmentListView.SelectedIndex;
+            BtnRemoveSegment.IsEnabled = idx >= 0;
+            BtnMoveSegmentUp.IsEnabled = idx > 0;
+            BtnMoveSegmentDown.IsEnabled = idx >= 0 && idx < _segments.Count - 1;
             UpdateSegmentRects();
         }
 
         private void SegmentListView_KeyDown(object sender, KeyRoutedEventArgs e)
         {
-            if (e.Key == VirtualKey.Delete) BtnRemoveSegment_Click(sender, e);
+            if (e.Key == VirtualKey.Delete) { BtnRemoveSegment_Click(sender, e); return; }
+
+            bool ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control)
+                        .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+            if (ctrl && e.Key == VirtualKey.Up)   { MoveSelectedSegment(-1); e.Handled = true; }
+            if (ctrl && e.Key == VirtualKey.Down) { MoveSelectedSegment(1);  e.Handled = true; }
         }
 
         private void BtnAddSegment_Click(object sender, RoutedEventArgs e)
@@ -891,11 +902,35 @@ namespace VideoCutCS
             if (SegmentListView.SelectedItem is not VideoSegment seg) return;
             int removedIndex = _segments.IndexOf(seg);
             _segments.Remove(seg);
-            // 削除後に Index を振り直す
-            for (int i = 0; i < _segments.Count; i++) _segments[i].Index = i + 1;
+            RenumberSegments();
             // 削除後に隣接するセグメントを自動選択
             if (_segments.Count > 0)
                 SegmentListView.SelectedIndex = Math.Min(removedIndex, _segments.Count - 1);
+        }
+
+        private void BtnMoveSegmentUp_Click(object sender, RoutedEventArgs e) => MoveSelectedSegment(-1);
+        private void BtnMoveSegmentDown_Click(object sender, RoutedEventArgs e) => MoveSelectedSegment(1);
+
+        private void SegmentListView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
+        {
+            RenumberSegments();
+            UpdateSegmentUI();
+        }
+
+        private void MoveSelectedSegment(int direction)
+        {
+            int idx = SegmentListView.SelectedIndex;
+            int newIdx = idx + direction;
+            if (idx < 0 || newIdx < 0 || newIdx >= _segments.Count) return;
+
+            _segments.Move(idx, newIdx);
+            RenumberSegments();
+            SegmentListView.SelectedIndex = newIdx;
+        }
+
+        private void RenumberSegments()
+        {
+            for (int i = 0; i < _segments.Count; i++) _segments[i].Index = i + 1;
         }
 
         private async void BtnBatchCut_Click(object sender, RoutedEventArgs e)

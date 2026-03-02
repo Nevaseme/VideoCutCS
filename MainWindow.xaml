@@ -2,6 +2,7 @@
     x:Class="VideoCutCS.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:VideoCutCS"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
@@ -77,11 +78,14 @@
                 <ListView Grid.Row="1"
                           x:Name="SegmentListView"
                           SelectionMode="Single"
+                          CanReorderItems="True"
+                          AllowDrop="True"
                           SelectionChanged="SegmentListView_SelectionChanged"
-                          KeyDown="SegmentListView_KeyDown">
+                          KeyDown="SegmentListView_KeyDown"
+                          DragItemsCompleted="SegmentListView_DragItemsCompleted">
                     <ListView.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding DisplayString}"
+                        <DataTemplate x:DataType="local:VideoSegment">
+                            <TextBlock Text="{x:Bind DisplayString, Mode=OneWay}"
                                        FontFamily="Consolas"
                                        FontSize="12"/>
                         </DataTemplate>
@@ -94,6 +98,7 @@
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
@@ -112,7 +117,23 @@
                             Margin="4,0,0,0"
                             HorizontalAlignment="Stretch"
                             ToolTipService.ToolTip="選択中のセグメントを削除"/>
-                    <Button Grid.Row="1" Grid.ColumnSpan="2"
+                    <Button Grid.Row="1" Grid.Column="0"
+                            x:Name="BtnMoveSegmentUp"
+                            Content="▲ 上へ"
+                            Click="BtnMoveSegmentUp_Click"
+                            IsEnabled="False"
+                            Margin="0,4,4,0"
+                            HorizontalAlignment="Stretch"
+                            ToolTipService.ToolTip="選択中のセグメントを上へ移動 (Ctrl+↑)"/>
+                    <Button Grid.Row="1" Grid.Column="1"
+                            x:Name="BtnMoveSegmentDown"
+                            Content="▼ 下へ"
+                            Click="BtnMoveSegmentDown_Click"
+                            IsEnabled="False"
+                            Margin="4,4,0,0"
+                            HorizontalAlignment="Stretch"
+                            ToolTipService.ToolTip="選択中のセグメントを下へ移動 (Ctrl+↓)"/>
+                    <Button Grid.Row="2" Grid.ColumnSpan="2"
                             x:Name="BtnBatchCut"
                             Content="✂ バッチカット実行"
                             Click="BtnBatchCut_Click"

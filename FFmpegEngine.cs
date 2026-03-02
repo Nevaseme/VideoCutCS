@@ -14,8 +14,8 @@ namespace VideoCutCS
 		private readonly string _ffmpegPath;
 		private readonly string _ffprobePath;
 
-		// ハードウェアエンコーダー検出キャッシュ
-		private string? _cachedHwEncoder;
+		// ハードウェアエンコーダー検出キャッシュ（コーデックファミリー → HWエンコーダー名）
+		private readonly Dictionary<string, string?> _hwEncoders = new(StringComparer.OrdinalIgnoreCase);
 		private bool _hwEncoderDetected;
 
 		public FFmpegEngine()
@@ -115,10 +115,16 @@ namespace VideoCutCS
 			var info = new VideoInfo();
 			if (!File.Exists(_ffprobePath)) return info;
 
-			string args = $"-v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate,codec_name,bit_rate -of default=noprint_wrappers=1:nokey=0 \"{inputPath}\"";
-			string output = await ExecuteFFmpegCommandAsync(_ffprobePath, args).ConfigureAwait(false);
+			// ビデオ・オーディオストリーム情報を並列取得
+			var vTask = ExecuteFFmpegCommandAsync(_ffprobePath,
+				$"-v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate,codec_name,bit_rate -of default=noprint_wrappers=1:nokey=0 \"{inputPath}\"");
+			var aTask = ExecuteFFmpegCommandAsync(_ffprobePath,
+				$"-v error -select_streams a:0 -show_entries stream=codec_name,bit_rate -of default=noprint_wrappers=1:nokey=0 \"{inputPath}\"");
 
-			ParseVideoInfo(output, info);
+			await Task.WhenAll(vTask, aTask).ConfigureAwait(false);
+
+			ParseVideoInfo(vTask.Result, info);
+			ParseAudioInfo(aTask.Result, info);
 			return info;
 		}
 
@@ -159,19 +165,36 @@ namespace VideoCutCS
 		}
 
 		/// <summary>
-		/// 利用可能なハードウェアエンコーダーを検出して返す。見つからなければ null。
-		/// 結果はキャッシュされるため2回目以降は即座に返る。
+		/// 利用可能なハードウェアエンコーダーをコーデックファミリーごとに検出する。
+		/// 検出済みの場合はキャッシュを返す。戻り値は検出されたエンコーダー一覧（UIツールチップ用）。
 		/// </summary>
 		public async Task<string?> DetectHardwareEncoderAsync()
 		{
-			if (_hwEncoderDetected) return _cachedHwEncoder;
+			if (_hwEncoderDetected)
+			{
+				var cached = _hwEncoders.Values.Where(v => v != null).ToList();
+				return cached.Count > 0 ? string.Join(", ", cached) : null;
+			}
 			if (!File.Exists(_ffmpegPath)) { _hwEncoderDetected = true; return null; }
 
 			string output = await ExecuteCommandGetOutputAsync(_ffmpegPath, "-hide_banner -encoders").ConfigureAwait(false);
-			string[] candidates = ["h264_nvenc", "h264_qsv", "h264_amf"];
-			_cachedHwEncoder = candidates.FirstOrDefault(e => output.Contains(e, StringComparison.OrdinalIgnoreCase));
+
+			string[][] families =
+			[
+				["h264", "h264_nvenc", "h264_qsv", "h264_amf"],
+				["hevc", "hevc_nvenc", "hevc_qsv", "hevc_amf"],
+				["av1",  "av1_nvenc",  "av1_qsv",  "av1_amf"],
+			];
+
+			foreach (var family in families)
+			{
+				_hwEncoders[family[0]] = family.Skip(1)
+					.FirstOrDefault(e => output.Contains(e, StringComparison.OrdinalIgnoreCase));
+			}
+
 			_hwEncoderDetected = true;
-			return _cachedHwEncoder;
+			var detected = _hwEncoders.Values.Where(v => v != null).ToList();
+			return detected.Count > 0 ? string.Join(", ", detected) : null;
 		}
 
 		public async Task<string> SmartCutVideoAsync(string inputPath, string outputPath, TimeSpan start, TimeSpan end, List<TimeSpan> keyframes)
@@ -217,7 +240,12 @@ namespace VideoCutCS
 		private async Task<string> ReencodeRangeAsync(string inputPath, string outputPath, TimeSpan start, TimeSpan end)
 		{
 			var info = await GetVideoInfoAsync(inputPath).ConfigureAwait(false);
-			string args = $"-ss {start} -to {end} -i \"{inputPath}\" {BuildVideoEncoderArgs(info)}-c:a copy -y \"{outputPath}\"";
+			string vEnc = BuildVideoEncoderArgs(info);
+			string aEnc = BuildAudioEncoderArgs(info);
+			string args = $"-ss {start} -to {end} -i \"{inputPath}\" " +
+				$"-map 0:v:0 -map 0:a? -map 0:s? " +
+				$"{vEnc}{aEnc}-c:s copy " +
+				$"-map_metadata 0 -noautorotate -avoid_negative_ts make_zero -y \"{outputPath}\"";
 			await ExecuteFFmpegCommandAsync(_ffmpegPath, args).ConfigureAwait(false);
 			return "スマートカット完了（全区間再エンコード）";
 		}
@@ -242,7 +270,11 @@ namespace VideoCutCS
 			try
 			{
 				var info = await GetVideoInfoAsync(inputPath).ConfigureAwait(false);
-				string enc = BuildVideoEncoderArgs(info);
+				string vEnc = BuildVideoEncoderArgs(info);
+				string aEnc = BuildAudioEncoderArgs(info);
+				// 全パートで統一するストリームマッピング・メタデータ引数
+				string mapArgs = "-map 0:v:0 -map 0:a? -map 0:s? ";
+				string metaArgs = "-map_metadata 0 -noautorotate -avoid_negative_ts make_zero ";
 				var tasks = new List<Task>();
 				int partIdx = 0;
 
@@ -253,7 +285,8 @@ namespace VideoCutCS
 					string f = Path.Combine(tempDir, $"temp_{partIdx++}_{id}.mp4");
 					tempFiles.Add(f);
 					tasks.Add(ExecuteFFmpegCommandAsync(_ffmpegPath,
-						$"-ss {start} -to {startSplit.Value} -i \"{inputPath}\" {enc}-c:a copy -y \"{f}\""));
+						$"-ss {start} -to {startSplit.Value} -i \"{inputPath}\" " +
+						$"{mapArgs}{vEnc}{aEnc}-c:s copy {metaArgs}-y \"{f}\""));
 				}
 
 				// --- 中間: ストリームコピー ---
@@ -262,7 +295,8 @@ namespace VideoCutCS
 					string f = Path.Combine(tempDir, $"temp_{partIdx++}_{id}.mp4");
 					tempFiles.Add(f);
 					tasks.Add(ExecuteFFmpegCommandAsync(_ffmpegPath,
-						$"-ss {midStart} -to {midEnd} -i \"{inputPath}\" -c copy -video_track_timescale 90000 -y \"{f}\""));
+						$"-ss {midStart} -to {midEnd} -i \"{inputPath}\" " +
+						$"{mapArgs}-c copy {metaArgs}-video_track_timescale 90000 -y \"{f}\""));
 				}
 
 				// --- 終了側: 再エンコード ---
@@ -271,7 +305,8 @@ namespace VideoCutCS
 					string f = Path.Combine(tempDir, $"temp_{partIdx++}_{id}.mp4");
 					tempFiles.Add(f);
 					tasks.Add(ExecuteFFmpegCommandAsync(_ffmpegPath,
-						$"-ss {endSplit.Value} -to {end} -i \"{inputPath}\" {enc}-c:a copy -y \"{f}\""));
+						$"-ss {endSplit.Value} -to {end} -i \"{inputPath}\" " +
+						$"{mapArgs}{vEnc}{aEnc}-c:s copy {metaArgs}-y \"{f}\""));
 				}
 
 				await Task.WhenAll(tasks).ConfigureAwait(false);
@@ -298,24 +333,64 @@ namespace VideoCutCS
 		}
 
 		/// <summary>
-		/// 設定と検出済みエンコーダーに応じてビデオエンコーダー引数を組み立てる。
+		/// ソースコーデックに応じたビデオエンコーダー引数を組み立てる。
+		/// 入力と同じコーデックで再エンコードすることで concat 時のコーデック不一致を防ぐ。
 		/// </summary>
 		private string BuildVideoEncoderArgs(VideoInfo info)
 		{
+			string codec = NormalizeCodecFamily(info.VideoCodec);
 			string bitrateArg = info.IsValid ? $"-b:v {info.BitRate} " : "";
 
-			if (AppSettings.Current.UseHardwareAccel && _cachedHwEncoder != null)
+			if (AppSettings.Current.UseHardwareAccel
+				&& _hwEncoders.TryGetValue(codec, out string? hwEnc) && hwEnc != null)
 			{
-				return _cachedHwEncoder switch
+				return hwEnc switch
 				{
+					// H.264
 					"h264_nvenc" => $"-c:v h264_nvenc -preset p4 -rc vbr -cq:v 23 {bitrateArg}-video_track_timescale 90000 ",
 					"h264_qsv"   => $"-c:v h264_qsv -global_quality 23 -preset medium {bitrateArg}-video_track_timescale 90000 ",
 					"h264_amf"   => $"-c:v h264_amf -quality balanced -qp_i 23 -qp_p 23 {bitrateArg}-video_track_timescale 90000 ",
-					_            => $"-c:v libx264 -preset fast -crf 23 {bitrateArg}-video_track_timescale 90000 "
+					// HEVC
+					"hevc_nvenc" => $"-c:v hevc_nvenc -preset p4 -rc vbr -cq:v 28 {bitrateArg}-video_track_timescale 90000 ",
+					"hevc_qsv"   => $"-c:v hevc_qsv -global_quality 28 -preset medium {bitrateArg}-video_track_timescale 90000 ",
+					"hevc_amf"   => $"-c:v hevc_amf -quality balanced -qp_i 28 -qp_p 28 {bitrateArg}-video_track_timescale 90000 ",
+					// AV1
+					"av1_nvenc"  => $"-c:v av1_nvenc -preset p4 -rc vbr -cq:v 30 {bitrateArg}-video_track_timescale 90000 ",
+					"av1_qsv"    => $"-c:v av1_qsv -global_quality 30 -preset medium {bitrateArg}-video_track_timescale 90000 ",
+					"av1_amf"    => $"-c:v av1_amf -quality balanced -qp_i 30 -qp_p 30 {bitrateArg}-video_track_timescale 90000 ",
+					_            => BuildSwVideoEncoderArgs(codec, bitrateArg)
 				};
 			}
-			return $"-c:v libx264 -preset fast -crf 23 {bitrateArg}-video_track_timescale 90000 ";
+			return BuildSwVideoEncoderArgs(codec, bitrateArg);
 		}
+
+		/// <summary>ソフトウェアエンコーダー引数を組み立てる。</summary>
+		private static string BuildSwVideoEncoderArgs(string codec, string bitrateArg) => codec switch
+		{
+			"hevc" => $"-c:v libx265 -preset fast -crf 28 {bitrateArg}-tag:v hvc1 -video_track_timescale 90000 ",
+			"av1"  => $"-c:v libsvtav1 -preset 6 -crf 30 {bitrateArg}-video_track_timescale 90000 ",
+			_      => $"-c:v libx264 -preset fast -crf 23 {bitrateArg}-video_track_timescale 90000 "
+		};
+
+		/// <summary>
+		/// 音声再エンコード引数を組み立てる。
+		/// スマートカットの結合部で音声サンプル境界を正確に揃えるため、
+		/// ストリームコピーではなく再エンコードを行う。
+		/// </summary>
+		private static string BuildAudioEncoderArgs(VideoInfo info)
+		{
+			string bitrate = info.AudioBitRate > 0 ? $"-b:a {info.AudioBitRate} " : "-b:a 192k ";
+			return $"-c:a aac {bitrate}";
+		}
+
+		/// <summary>ffprobe の codec_name を正規化してコーデックファミリー文字列を返す。</summary>
+		internal static string NormalizeCodecFamily(string codec) => codec.ToLowerInvariant() switch
+		{
+			"h264" or "avc" or "avc1" => "h264",
+			"hevc" or "h265" or "hev1" or "hvc1" => "hevc",
+			"av1" or "av01" => "av1",
+			_ => "h264"
+		};
 
 		private async Task<string> ExecuteFFmpegCommandAsync(string exePath, string args, string? workingDirectory = null)
 		{
@@ -384,6 +459,22 @@ namespace VideoCutCS
 						if (frParts.Length == 2 && double.TryParse(frParts[0], out double n) && double.TryParse(frParts[1], out double d) && d != 0)
 							info.FrameRate = n / d;
 						break;
+				}
+			}
+		}
+
+		/// <summary>ffprobe のオーディオストリーム出力をパースする。</summary>
+		internal void ParseAudioInfo(string rawOutput, VideoInfo info)
+		{
+			foreach (var line in rawOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+			{
+				var parts = line.Split('=', StringSplitOptions.TrimEntries);
+				if (parts.Length != 2) continue;
+				string val = parts[1];
+				switch (parts[0])
+				{
+					case "codec_name": info.AudioCodec = val; break;
+					case "bit_rate": if (long.TryParse(val, out long abr)) info.AudioBitRate = abr; break;
 				}
 			}
 		}
